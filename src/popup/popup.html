@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LibeCity to Notion</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- ヘッダー -->
+    <div class="popup-header">
+      <h1>LibeCity to Notion</h1>
+      <div class="version">v1.0.0</div>
+    </div>
+
+    <!-- ステータス表示 -->
+    <div class="status-section">
+      <div class="status-item">
+        <span class="status-label">接続状態:</span>
+        <span id="connectionStatus" class="status-value">確認中...</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">ページ:</span>
+        <span id="pageStatus" class="status-value">確認中...</span>
+      </div>
+    </div>
+
+    <!-- メイン操作エリア -->
+    <div class="main-section">
+      <!-- データベース選択 -->
+      <div class="input-group">
+        <label for="databaseSelect">保存先データベース:</label>
+        <select id="databaseSelect" class="database-select">
+          <option value="">データベースを選択...</option>
+        </select>
+        <button id="refreshDatabases" class="refresh-btn" title="データベース一覧を更新">
+          <span class="refresh-icon">🔄</span>
+        </button>
+      </div>
+
+      <!-- コンテンツ選択モード -->
+      <div class="content-selection">
+        <button id="selectContentBtn" class="secondary-btn">
+          <span class="icon">🎯</span>
+          コンテンツを選択
+        </button>
+        <div id="selectedContent" class="selected-content" style="display: none;">
+          <div class="selected-preview">
+            <span class="preview-text"></span>
+            <button class="clear-selection" title="選択をクリア">×</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 保存ボタン -->
+      <button id="saveToNotion" class="save-btn" disabled>
+        <span class="icon">💾</span>
+        <span class="btn-text">Notionに保存</span>
+        <div class="spinner" style="display: none;"></div>
+      </button>
+    </div>
+
+    <!-- プログレス表示 -->
+    <div id="progressSection" class="progress-section" style="display: none;">
+      <div class="progress-bar">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+      <div id="progressText" class="progress-text">処理中...</div>
+    </div>
+
+    <!-- 成功通知 -->
+    <div id="successNotification" class="notification success" style="display: none;">
+      <div class="notification-content">
+        <span class="notification-icon">✅</span>
+        <div class="notification-text">
+          <div class="notification-title">保存完了</div>
+          <div class="notification-message">Notionに正常に保存されました</div>
+        </div>
+      </div>
+      <a id="notionLink" class="notion-link" target="_blank" rel="noopener">
+        <span class="icon">🔗</span>
+        Notionで開く
+      </a>
+    </div>
+
+    <!-- エラー通知 -->
+    <div id="errorNotification" class="notification error" style="display: none;">
+      <div class="notification-content">
+        <span class="notification-icon">❌</span>
+        <div class="notification-text">
+          <div class="notification-title">エラーが発生しました</div>
+          <div id="errorMessage" class="notification-message"></div>
+        </div>
+      </div>
+      <button id="retryBtn" class="retry-btn">再試行</button>
+    </div>
+
+    <!-- 履歴セクション -->
+    <div class="history-section">
+      <div class="section-header">
+        <h3>最近の保存履歴</h3>
+        <button id="clearHistory" class="clear-btn">クリア</button>
+      </div>
+      <div id="historyList" class="history-list">
+        <div class="no-history">履歴がありません</div>
+      </div>
+    </div>
+
+    <!-- フッター -->
+    <div class="popup-footer">
+      <button id="settingsBtn" class="footer-btn">
+        <span class="icon">⚙️</span>
+        設定
+      </button>
+      <button id="helpBtn" class="footer-btn">
+        <span class="icon">❓</span>
+        ヘルプ
+      </button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html> 
