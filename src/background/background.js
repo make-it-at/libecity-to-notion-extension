@@ -239,6 +239,10 @@ async function createDefaultDatabase(pageTitle = 'LibeCity Chat Archive') {
       return parentResult;
     }
     
+    // タイムスタンプを追加して重複を避ける
+    const timestamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const databaseTitle = `${pageTitle} (${timestamp})`;
+    
     const databaseData = {
       parent: {
         type: 'page_id',
@@ -248,7 +252,7 @@ async function createDefaultDatabase(pageTitle = 'LibeCity Chat Archive') {
         {
           type: 'text',
           text: {
-            content: pageTitle
+            content: databaseTitle
           }
         }
       ],

@@ -94,6 +94,12 @@ function setupEventListeners() {
   elements.databaseSelect.addEventListener('change', handleDatabaseChange);
   elements.refreshDatabases.addEventListener('click', handleRefreshDatabases);
   
+  // 新しいデータベース作成ボタン
+  const createDatabaseBtn = document.getElementById('createDatabaseBtn');
+  if (createDatabaseBtn) {
+    createDatabaseBtn.addEventListener('click', handleCreateDatabase);
+  }
+  
   // コンテンツ選択
   elements.selectContentBtn.addEventListener('click', handleSelectContent);
   
@@ -297,6 +303,46 @@ async function createDefaultDatabase() {
 // データベース更新の処理
 async function handleRefreshDatabases() {
   await loadDatabases();
+}
+
+// 新しいデータベース作成の処理
+async function handleCreateDatabase() {
+  try {
+    const createBtn = document.getElementById('createDatabaseBtn');
+    showLoading(createBtn);
+    
+    showProgress('新しいデータベースを作成中...', 30);
+    
+    const response = await chrome.runtime.sendMessage({ 
+      action: 'createDefaultDatabase',
+      pageTitle: currentTab?.title || 'LibeCity Chat Archive'
+    });
+    
+    if (response && response.success) {
+      showProgress('データベース作成完了', 100);
+      
+      // データベース一覧を更新
+      await loadDatabases();
+      
+      // 新しく作成されたデータベースを選択
+      elements.databaseSelect.value = response.databaseId;
+      await chrome.storage.sync.set({ selectedDatabase: response.databaseId });
+      
+      updateSaveButtonState();
+      hideProgress();
+      
+      showSuccess('新しいデータベースが作成されました！プロパティ設定の問題が解決されました。');
+    } else {
+      throw new Error(response?.error || 'データベースの作成に失敗しました');
+    }
+  } catch (error) {
+    console.error('Failed to create database:', error);
+    hideProgress();
+    showError('データベースの作成に失敗しました: ' + error.message);
+  } finally {
+    const createBtn = document.getElementById('createDatabaseBtn');
+    hideLoading(createBtn);
+  }
 }
 
 // コンテンツ選択の処理
