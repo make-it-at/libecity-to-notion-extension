@@ -524,8 +524,8 @@ function extractStructuredContent(element) {
           return {
             type: 'image',
             src: node.src,
-            alt: node.alt || '',
-            title: node.title || ''
+            alt: node.alt && node.alt.trim() ? node.alt.trim() : null,
+            title: node.title && node.title.trim() ? node.title.trim() : null
           };
         } else if (tagName === 'br') {
           return {

@@ -469,24 +469,30 @@ async function saveToNotion(databaseId, content) {
           case 'image':
             // 画像ブロックを追加
             if (block.src) {
-              children.push({
+              const imageBlock = {
                 object: 'block',
                 type: 'image',
                 image: {
                   type: 'external',
                   external: {
                     url: block.src
-                  },
-                  caption: block.alt ? [
-                    {
-                      type: 'text',
-                      text: {
-                        content: block.alt
-                      }
-                    }
-                  ] : []
+                  }
                 }
-              });
+              };
+              
+              // captionは空でない場合のみ追加
+              if (block.alt && block.alt.trim()) {
+                imageBlock.image.caption = [
+                  {
+                    type: 'text',
+                    text: {
+                      content: block.alt.trim()
+                    }
+                  }
+                ];
+              }
+              
+              children.push(imageBlock);
             }
             break;
         }
@@ -627,6 +633,7 @@ async function saveToNotion(databaseId, content) {
     const adjustedPageData = await adjustPropertiesForDatabase(databaseId, pageData);
     
     // ページを作成
+    console.log('Creating Notion page with data:', JSON.stringify(adjustedPageData, null, 2));
     const response = await makeNotionRequest('/pages', 'POST', adjustedPageData);
     
     if (response.ok) {
@@ -647,7 +654,28 @@ async function saveToNotion(databaseId, content) {
       const error = await response.json();
       console.error('Notion API Error:', error);
       await updateStats({ errors: 1 });
-      return { success: false, error: error.message || 'ページの作成に失敗しました' };
+      
+      // 詳細なエラー情報を提供
+      let errorMessage = 'ページの作成に失敗しました';
+      if (error.message) {
+        errorMessage = error.message;
+        
+        // 文字数制限エラーの場合
+        if (error.message.includes('should be ≤')) {
+          errorMessage = 'テキストが長すぎます。文字数制限(2000文字)を超えています。';
+        }
+        
+        // プロパティエラーの場合
+        if (error.message.includes('body failed validation')) {
+          errorMessage = 'データベースのプロパティ設定に問題があります。新しいデータベースを作成してください。';
+        }
+      }
+      
+      return { 
+        success: false, 
+        error: errorMessage,
+        details: error
+      };
     }
   } catch (error) {
     console.error('Failed to save to Notion:', error);
