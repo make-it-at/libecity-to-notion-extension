@@ -821,8 +821,8 @@ async function saveToNotion(databaseId, content) {
             }
           });
           
-          // 各画像を追加（最大3個まで）
-          validImages.slice(0, 3).forEach((image, index) => {
+          // 各画像を追加（最大10個まで）
+          validImages.slice(0, 10).forEach((image, index) => {
             children.push({
               object: 'block',
               type: 'image',
@@ -845,8 +845,8 @@ async function saveToNotion(databaseId, content) {
             console.log(`Added image ${index + 1}: ${image.src.substring(0, 50)}...`);
           });
           
-          if (validImages.length > 3) {
-            console.log(`Note: Only first 3 images added (${validImages.length} total found)`);
+          if (validImages.length > 10) {
+            console.log(`Note: Only first 10 images added (${validImages.length} total found)`);
           }
         } else {
           console.log('No valid images found after filtering');

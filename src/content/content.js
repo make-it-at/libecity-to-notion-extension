@@ -669,6 +669,33 @@ function extractStructuredContent(element) {
         });
       }
     });
+    
+    // .tweetImageArea内の画像も処理（libecity.comの投稿画像）
+    const tweetImageArea = element.querySelector('.tweetImageArea');
+    if (tweetImageArea) {
+      console.log('Found .tweetImageArea, processing tweet images');
+      const tweetImages = tweetImageArea.querySelectorAll('.tweetImage img');
+      console.log(`Found ${tweetImages.length} tweet images`);
+      
+      tweetImages.forEach((img, index) => {
+        if (img.src) {
+          const validatedUrl = isValidImageUrl(img.src);
+          if (validatedUrl) {
+            console.log(`Found tweet image ${index + 1}: ${img.src.substring(0, 50)}...`);
+            structuredContent.push({
+              type: 'image',
+              src: typeof validatedUrl === 'string' ? validatedUrl : img.src,
+              alt: img.alt && img.alt.trim() ? img.alt.trim() : '',
+              title: img.title && img.title.trim() ? img.title.trim() : '',
+              width: img.naturalWidth || img.width || 0,
+              height: img.naturalHeight || img.height || 0
+            });
+          } else {
+            console.warn('Invalid tweet image URL skipped:', img.src);
+          }
+        }
+      });
+    }
   } else {
     // 通常の要素処理
     Array.from(element.childNodes).forEach(child => walkNodes(child, {}));
