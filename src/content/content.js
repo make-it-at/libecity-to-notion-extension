@@ -1067,20 +1067,21 @@ async function extractElementContent(element) {
           // 日本時間として表示用文字列を作成
           const localTimeString = `${year}/${month.padStart(2, '0')}/${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute}`;
           
-          // Notion API用: 日本時間をそのまま送信（タイムゾーンなし）
-          const japanISOString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}:00`;
+          // Notion API用: 日本時間をUTC時刻に変換（Notionが自動でローカル時間として解釈するため）
+          const japanDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}:00+09:00`);
+          const utcISOString = japanDate.toISOString(); // UTC時刻
           
           // タイムゾーン情報付きで保存
           content.timestamp = localTimeString; // 表示用（日本時間）
-          content.timestampISO = japanISOString; // Notion API用（日本時間、タイムゾーンなし）
+          content.timestampISO = utcISOString; // Notion API用（UTC時刻、タイムゾーンなし）
           content.timezone = null; // タイムゾーン指定なし
           
                       console.log('Processed libecity timestamp:', {
             original: timestamp,
             local: localTimeString,
-            japanISO: japanISOString,
+            utcISO: utcISOString,
             timezone: content.timezone,
-            note: 'Sending Japan time directly without timezone conversion'
+            note: 'Sending UTC time without timezone specification (Notion will display in user timezone)'
           });
         } else {
           // その他のフォーマットの場合

@@ -369,14 +369,14 @@ async function saveToNotion(databaseId, content) {
     let dateTimeString = null;
     
     if (content.timestampISO) {
-      // content.jsで処理済みの日本時間ISO形式がある場合
-      date = content.timestampISO; // 日本時間（タイムゾーンなし）
+      // content.jsで処理済みのUTC時刻ISO形式がある場合
+      date = content.timestampISO; // UTC時刻（タイムゾーンなし）
       dateTimeString = content.timestamp; // 表示用（日本時間）
-      console.log('Using pre-processed Japan time for Notion API:', { 
-        japanISO: date, 
+      console.log('Using pre-processed UTC time for Notion API:', { 
+        utcISO: date, 
         displayTime: dateTimeString, 
         timezone: content.timezone,
-        note: 'Japan time without timezone specification'
+        note: 'UTC time without timezone specification (Notion auto-converts to user timezone)'
       });
     } else if (content.timestamp) {
       try {
@@ -446,9 +446,9 @@ async function saveToNotion(databaseId, content) {
     }
     
     console.log('Final date processing result:', { 
-      japanDate: date, 
+      utcDate: date, 
       displayString: dateTimeString, 
-      timezoneMode: 'no_timezone_specified',
+      timezoneMode: 'utc_without_timezone_spec',
       originalContent: {
         timestamp: content.timestamp,
         timestampISO: content.timestampISO,
@@ -524,7 +524,7 @@ async function saveToNotion(databaseId, content) {
       start: date,
       time_zone: 'none (not specified)',
       expectedDisplay: dateTimeString,
-      approach: 'Direct Japan time without timezone conversion'
+      approach: 'UTC time without timezone - Notion auto-converts to user timezone'
     });
     // 子要素（構造化されたブロック生成）
     const children = [];
