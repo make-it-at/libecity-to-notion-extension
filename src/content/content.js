@@ -531,15 +531,21 @@ function extractStructuredContent(element) {
       if (tagName === 'img') {
         // 画像要素を処理
         const src = node.src;
-        if (src && isValidImageUrl(src)) {
-          structuredContent.push({
-            type: 'image',
-            src: typeof isValidImageUrl(src) === 'string' ? isValidImageUrl(src) : src,
-            alt: node.alt && node.alt.trim() ? node.alt.trim() : '',
-            title: node.title && node.title.trim() ? node.title.trim() : '',
-            width: node.naturalWidth || node.width || 0,
-            height: node.naturalHeight || node.height || 0
-          });
+        if (src) {
+          const validatedUrl = isValidImageUrl(src);
+          if (validatedUrl) {
+            console.log(`Found image in structured content: ${src.substring(0, 50)}...`);
+            structuredContent.push({
+              type: 'image',
+              src: typeof validatedUrl === 'string' ? validatedUrl : src,
+              alt: node.alt && node.alt.trim() ? node.alt.trim() : '',
+              title: node.title && node.title.trim() ? node.title.trim() : '',
+              width: node.naturalWidth || node.width || 0,
+              height: node.naturalHeight || node.height || 0
+            });
+          } else {
+            console.warn('Invalid image URL skipped in structured content:', src);
+          }
         }
       } else if (tagName === 'br') {
         // 改行要素を明示的に処理
@@ -570,15 +576,21 @@ function extractStructuredContent(element) {
           const linkImages = node.querySelectorAll('img');
           if (linkImages.length > 0) {
             linkImages.forEach(img => {
-              if (img.src && isValidImageUrl(img.src)) {
-                structuredContent.push({
-                  type: 'image',
-                  src: typeof isValidImageUrl(img.src) === 'string' ? isValidImageUrl(img.src) : img.src,
-                  alt: img.alt || linkText || '',
-                  title: img.title || linkText || '',
-                  isLinked: true,
-                  linkUrl: linkUrl
-                });
+              if (img.src) {
+                const validatedUrl = isValidImageUrl(img.src);
+                if (validatedUrl) {
+                  console.log(`Found linked image in structured content: ${img.src.substring(0, 50)}...`);
+                  structuredContent.push({
+                    type: 'image',
+                    src: typeof validatedUrl === 'string' ? validatedUrl : img.src,
+                    alt: img.alt || linkText || '',
+                    title: img.title || linkText || '',
+                    isLinked: true,
+                    linkUrl: linkUrl
+                  });
+                } else {
+                  console.warn('Invalid linked image URL skipped:', img.src);
+                }
               }
             });
           } else if (linkText) {
@@ -614,14 +626,19 @@ function extractStructuredContent(element) {
       const textContent = p.textContent.trim();
       const hasOnlyBr = p.innerHTML.trim() === '<br>' || p.innerHTML.trim() === '';
       
-      if (!textContent || hasOnlyBr) {
+      // 画像が含まれているかチェック
+      const hasImages = p.querySelectorAll('img').length > 0;
+      
+      // テキストも画像もない場合のみ空白行として処理
+      if ((!textContent || hasOnlyBr) && !hasImages) {
         // 空白行として処理
         structuredContent.push({
           type: 'empty_line'
         });
         console.log(`Added empty line from <p> tag at index ${index}`);
       } else {
-        // 通常の段落として処理（文字修飾を含む）
+        // 通常の段落として処理（文字修飾と画像を含む）
+        console.log(`Processing paragraph ${index} with content: text=${!!textContent}, images=${hasImages}`);
         Array.from(p.childNodes).forEach(child => walkNodes(child, {}));
       }
       
@@ -684,6 +701,28 @@ function extractStructuredContent(element) {
     return acc;
   }, {});
   console.log('Content structure summary:', summary);
+  
+  // 画像の詳細ログ
+  const images = cleanedContent.filter(item => item.type === 'image');
+  if (images.length > 0) {
+    console.log(`Found ${images.length} images in structured content:`);
+    images.forEach((img, index) => {
+      console.log(`  Image ${index + 1}: ${img.src.substring(0, 80)}...`);
+      console.log(`    Alt: "${img.alt}", Title: "${img.title}"`);
+      console.log(`    Dimensions: ${img.width}x${img.height}`);
+    });
+  } else {
+    console.warn('No images found in structured content - this might indicate an extraction issue');
+    
+    // 元要素に画像があるかチェック
+    const allImages = element.querySelectorAll('img');
+    console.log(`Original element contains ${allImages.length} img tags:`);
+    allImages.forEach((img, index) => {
+      console.log(`  Original img ${index + 1}: ${img.src.substring(0, 80)}...`);
+      console.log(`    Classes: "${img.className}"`);
+      console.log(`    Parent tag: ${img.parentElement?.tagName}`);
+    });
+  }
   
   return cleanedContent;
 }
