@@ -503,7 +503,8 @@ async function handleSaveToNotion() {
       title: extractResponse.content.title || currentTab.title,
       url: currentTab.url,
       notionUrl: saveResponse.pageUrl,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      blocks: extractResponse.content.blocks || 0
     });
     
     // 履歴を更新
@@ -579,23 +580,38 @@ function updateHistoryDisplay(history) {
   });
 }
 
-// 履歴への追加
-async function addToHistory(item) {
-  try {
-    const result = await chrome.storage.local.get('saveHistory');
-    const history = result.saveHistory || [];
-    
-    history.push(item);
-    
-    // 最新20件のみ保持
-    if (history.length > 20) {
-      history.splice(0, history.length - 20);
-    }
-    
-    await chrome.storage.local.set({ saveHistory: history });
-  } catch (error) {
-    console.error('Failed to add to history:', error);
+// 履歴に項目を追加
+function addToHistory(item) {
+  const historyList = document.getElementById('historyList');
+  
+  const historyItem = document.createElement('div');
+  historyItem.className = 'history-item';
+  
+  const title = item.title.length > 30 ? item.title.substring(0, 30) + '...' : item.title;
+  const blocksInfo = item.blocks ? ` (${item.blocks}ブロック)` : '';
+  
+  historyItem.innerHTML = `
+    <div class="history-title">${title}${blocksInfo}</div>
+    <div class="history-meta">
+      <span class="history-time">${item.timestamp}</span>
+      ${item.pageUrl ? `<a href="${item.pageUrl}" target="_blank" class="history-link">Notionで開く</a>` : ''}
+    </div>
+  `;
+  
+  // 最新の項目を先頭に追加
+  if (historyList.firstChild) {
+    historyList.insertBefore(historyItem, historyList.firstChild);
+  } else {
+    historyList.appendChild(historyItem);
   }
+  
+  // 履歴が5個を超えたら古いものを削除
+  while (historyList.children.length > 5) {
+    historyList.removeChild(historyList.lastChild);
+  }
+  
+  // ローカルストレージに保存
+  saveHistoryToStorage();
 }
 
 // メッセージハンドラー
@@ -716,4 +732,115 @@ function formatDate(timestamp) {
     month: 'short',
     day: 'numeric'
   });
+}
+
+async function saveToNotionDatabase(databaseId) {
+  const saveButton = document.getElementById('saveBtn');
+  const progressContainer = document.getElementById('progressContainer');
+  const progressBar = document.getElementById('progressBar');
+  const progressText = document.getElementById('progressText');
+  const successMessage = document.getElementById('successMessage');
+  
+  try {
+    // UIの更新
+    saveButton.disabled = true;
+    saveButton.textContent = 'コンテンツを抽出中...';
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '10%';
+    progressText.textContent = 'コンテンツを抽出しています...';
+    
+    // アクティブタブの取得
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    
+    // コンテンツの抽出
+    const extractResult = await new Promise((resolve) => {
+      chrome.tabs.sendMessage(tab.id, { action: 'extractContent' }, resolve);
+    });
+    
+    if (!extractResult.success) {
+      throw new Error(extractResult.error || 'コンテンツの抽出に失敗しました');
+    }
+    
+    // 進捗更新
+    progressBar.style.width = '30%';
+    progressText.textContent = 'Notionに保存中...';
+    saveButton.textContent = 'Notionに保存中...';
+    
+    // Notionに保存
+    const saveResult = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({
+        action: 'saveToNotion',
+        databaseId: databaseId,
+        content: extractResult.content
+      }, resolve);
+    });
+    
+    if (saveResult.success) {
+      // 成功時の処理
+      progressBar.style.width = '100%';
+      progressText.textContent = '保存完了！';
+      
+      // 詳細な結果表示
+      let resultMessage = '✅ 保存が完了しました！';
+      if (saveResult.totalBlocks) {
+        resultMessage += `\n📝 ${saveResult.totalBlocks}個のブロックを保存`;
+      }
+      
+      successMessage.innerHTML = resultMessage.replace(/\n/g, '<br>');
+      successMessage.style.display = 'block';
+      
+      // 履歴に追加
+      addToHistory({
+        title: extractResult.content.title || 'Untitled',
+        url: extractResult.content.url || tab.url,
+        timestamp: new Date().toLocaleString(),
+        pageUrl: saveResult.pageUrl,
+        blocks: saveResult.totalBlocks || 0
+      });
+      
+      // ボタンを復元
+      setTimeout(() => {
+        saveButton.disabled = false;
+        saveButton.textContent = '保存';
+        progressContainer.style.display = 'none';
+        successMessage.style.display = 'none';
+      }, 3000);
+      
+    } else {
+      throw new Error(saveResult.error || '保存に失敗しました');
+    }
+    
+  } catch (error) {
+    console.error('Save error:', error);
+    
+    // エラー表示
+    progressText.textContent = 'エラーが発生しました';
+    progressBar.style.backgroundColor = '#ff4444';
+    
+    const errorMessage = document.createElement('div');
+    errorMessage.className = 'error-message';
+    errorMessage.textContent = `❌ ${error.message}`;
+    errorMessage.style.cssText = `
+      color: #ff4444;
+      font-size: 12px;
+      margin-top: 10px;
+      padding: 8px;
+      background: #fff2f2;
+      border-radius: 4px;
+      border: 1px solid #ffcccc;
+    `;
+    
+    document.querySelector('.popup-main').appendChild(errorMessage);
+    
+    // エラー表示を3秒後に削除
+    setTimeout(() => {
+      errorMessage.remove();
+      progressContainer.style.display = 'none';
+      progressBar.style.backgroundColor = '#4CAF50';
+    }, 3000);
+    
+    // ボタンを復元
+    saveButton.disabled = false;
+    saveButton.textContent = '保存';
+  }
 } 
