@@ -466,11 +466,13 @@ function extractStructuredContent(element) {
                   content: trimmedLine
                 });
               }
-            } else if (line === '' && i < lines.length - 1) {
+            } else if (!trimmedLine && i < lines.length - 1) {
               // 空白行の場合（最後の行でない場合のみ）
+              // 空白文字のみの行も空白行として扱う
               structuredContent.push({
                 type: 'empty_line'
               });
+              console.log(`Added empty line at position ${i}`);
             }
             
             // 行の終わりに改行を追加（最後の行以外）
@@ -573,13 +575,19 @@ function extractStructuredContent(element) {
       Array.from(element.childNodes).forEach(child => walkNodes(child));
     }
     
-    // 連続する改行を整理し、最後の改行を削除
+    // 連続する改行を整理し、最後の改行を削除（空白行は保持）
     const cleanedContent = [];
     for (let i = 0; i < structuredContent.length; i++) {
       const current = structuredContent[i];
       const next = structuredContent[i + 1];
       
-      // 連続する改行をスキップ
+      // 空白行は常に保持
+      if (current.type === 'empty_line') {
+        cleanedContent.push(current);
+        continue;
+      }
+      
+      // 連続する改行をスキップ（ただし空白行は除く）
       if (current.type === 'linebreak' && next && next.type === 'linebreak') {
         continue;
       }
@@ -591,6 +599,8 @@ function extractStructuredContent(element) {
       
       cleanedContent.push(current);
     }
+    
+    console.log(`Cleaned content: ${cleanedContent.length} items (empty_lines: ${cleanedContent.filter(item => item.type === 'empty_line').length})`);
     
     console.log(`Extracted ${cleanedContent.length} structured content items (after cleanup):`, cleanedContent);
     

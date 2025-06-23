@@ -395,33 +395,55 @@ async function saveToNotion(databaseId, content) {
         if (!isNaN(parsedDate.getTime())) {
           date = parsedDate.toISOString();
           if (!dateTimeString) {
-            // 日本時間での表示用文字列を生成
-            const japanTime = new Date(parsedDate.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
-            dateTimeString = japanTime.toLocaleString('ja-JP', {
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit',
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: false
-            }).replace(/\//g, '/').replace(',', '');
+            // 日本時間での表示用文字列を生成（先頭0を保持）
+            const japanTime = new Date(parsedDate.getTime());
+            const year = japanTime.getFullYear();
+            const month = String(japanTime.getMonth() + 1).padStart(2, '0');
+            const day = String(japanTime.getDate()).padStart(2, '0');
+            const hour = String(japanTime.getHours()).padStart(2, '0');
+            const minute = String(japanTime.getMinutes()).padStart(2, '0');
+            dateTimeString = `${year}/${month}/${day} ${hour}:${minute}`;
           }
         } else {
           console.warn('Invalid date format:', content.timestamp);
           date = new Date().toISOString();
-          dateTimeString = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+          const now = new Date();
+          const year = now.getFullYear();
+          const month = String(now.getMonth() + 1).padStart(2, '0');
+          const day = String(now.getDate()).padStart(2, '0');
+          const hour = String(now.getHours()).padStart(2, '0');
+          const minute = String(now.getMinutes()).padStart(2, '0');
+          dateTimeString = `${year}/${month}/${day} ${hour}:${minute}`;
         }
       } catch (error) {
         console.error('Date parsing error:', error);
         date = new Date().toISOString();
-        dateTimeString = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hour = String(now.getHours()).padStart(2, '0');
+        const minute = String(now.getMinutes()).padStart(2, '0');
+        dateTimeString = `${year}/${month}/${day} ${hour}:${minute}`;
       }
     } else if (content.metadata?.postTime?.timestamp) {
       date = content.metadata.postTime.timestamp;
-      dateTimeString = new Date(date).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+      const metaDate = new Date(date);
+      const year = metaDate.getFullYear();
+      const month = String(metaDate.getMonth() + 1).padStart(2, '0');
+      const day = String(metaDate.getDate()).padStart(2, '0');
+      const hour = String(metaDate.getHours()).padStart(2, '0');
+      const minute = String(metaDate.getMinutes()).padStart(2, '0');
+      dateTimeString = `${year}/${month}/${day} ${hour}:${minute}`;
     } else {
       date = new Date().toISOString();
-      dateTimeString = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const hour = String(now.getHours()).padStart(2, '0');
+      const minute = String(now.getMinutes()).padStart(2, '0');
+      dateTimeString = `${year}/${month}/${day} ${hour}:${minute}`;
     }
     
     console.log('Processed date with timezone:', { date, dateTimeString, timezone: 'Asia/Tokyo' });
