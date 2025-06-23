@@ -463,39 +463,45 @@ async function saveToNotion(databaseId, content) {
     if (structuredContent.length > 0) {
       console.log(`Step 6a: Processing ${structuredContent.length} structured content blocks`);
       
+      // 連続するテキストとリンクを1つの段落に統合
+      let currentParagraph = [];
+      
       structuredContent.forEach((block, index) => {
         switch (block.type) {
           case 'text':
-            // 各テキストブロックを個別の段落として追加
-            children.push({
-              object: 'block',
-              type: 'paragraph',
-              paragraph: {
-                rich_text: [{
-                  type: 'text',
-                  text: { content: block.content }
-                }]
-              }
+            // テキストを現在の段落に追加
+            currentParagraph.push({
+              type: 'text',
+              text: { content: block.content }
             });
             break;
             
           case 'link':
-            // リンクを個別の段落として追加
-            children.push({
-              object: 'block',
-              type: 'paragraph',
-              paragraph: {
-                rich_text: [{
-                  type: 'text',
-                  text: { content: block.text },
-                  annotations: { underline: true },
-                  href: block.url
-                }]
+            // リンクを現在の段落に追加（Notion API正式形式）
+            currentParagraph.push({
+              type: 'text',
+              text: { 
+                content: block.text,
+                link: { url: block.url }
+              },
+              annotations: { 
+                underline: true,
+                color: 'blue'
               }
             });
             break;
             
           case 'image':
+            // 画像の前に蓄積された段落を追加
+            if (currentParagraph.length > 0) {
+              children.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: { rich_text: currentParagraph }
+              });
+              currentParagraph = [];
+            }
+            
             // 画像ブロックを追加
             if (isValidNotionImageUrl(block.src)) {
               children.push({
@@ -516,18 +522,25 @@ async function saveToNotion(databaseId, content) {
             break;
             
           case 'linebreak':
-            // 改行は空の段落として追加
-            children.push({
-              object: 'block',
-              type: 'paragraph',
-              paragraph: {
-                rich_text: [{
-                  type: 'text',
-                  text: { content: '' }
-                }]
-              }
-            });
+            // 改行の場合、現在の段落を完成させる
+            if (currentParagraph.length > 0) {
+              children.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: { rich_text: currentParagraph }
+              });
+              currentParagraph = [];
+            }
             break;
+        }
+        
+        // 最後のブロックの場合、残った段落を追加
+        if (index === structuredContent.length - 1 && currentParagraph.length > 0) {
+          children.push({
+            object: 'block',
+            type: 'paragraph',
+            paragraph: { rich_text: currentParagraph }
+          });
         }
         
         // 進捗ログ（50ブロックごと）
@@ -586,12 +599,17 @@ async function saveToNotion(databaseId, content) {
                   }
                 }
                 
-                // リンク部分（埋め込み）
+                // リンク部分（埋め込み）- Notion API正式形式
                 richText.push({
                   type: 'text',
-                  text: { content: url },
-                  annotations: { underline: true },
-                  href: url
+                  text: { 
+                    content: url,
+                    link: { url: url }
+                  },
+                  annotations: { 
+                    underline: true,
+                    color: 'blue'
+                  }
                 });
                 
                 lastIndex = urlIndex + url.length;

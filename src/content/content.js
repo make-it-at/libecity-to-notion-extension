@@ -411,10 +411,55 @@ function extractStructuredContent(element) {
           // テキストを改行で分割し、各行を個別のブロックとして追加
           const lines = text.split(/\n/).map(line => line.trim()).filter(line => line);
           lines.forEach(line => {
-            structuredContent.push({
-              type: 'text',
-              content: line
-            });
+            // テキスト内のURLを検出してリンク化
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const urlMatches = line.match(urlRegex);
+            
+            if (urlMatches) {
+              // URLを含むテキストの場合、テキストとリンクを分離
+              let lastIndex = 0;
+              urlMatches.forEach(url => {
+                const urlIndex = line.indexOf(url, lastIndex);
+                
+                // URL前のテキスト
+                if (urlIndex > lastIndex) {
+                  const beforeText = line.substring(lastIndex, urlIndex).trim();
+                  if (beforeText) {
+                    structuredContent.push({
+                      type: 'text',
+                      content: beforeText
+                    });
+                  }
+                }
+                
+                // URLをリンクとして追加
+                structuredContent.push({
+                  type: 'link',
+                  url: url,
+                  text: url,
+                  title: ''
+                });
+                
+                lastIndex = urlIndex + url.length;
+              });
+              
+              // URL後のテキスト
+              if (lastIndex < line.length) {
+                const afterText = line.substring(lastIndex).trim();
+                if (afterText) {
+                  structuredContent.push({
+                    type: 'text',
+                    content: afterText
+                  });
+                }
+              }
+            } else {
+              // 通常のテキスト
+              structuredContent.push({
+                type: 'text',
+                content: line
+              });
+            }
           });
         }
       } else if (node.nodeType === Node.ELEMENT_NODE) {
