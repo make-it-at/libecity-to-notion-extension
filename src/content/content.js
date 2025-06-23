@@ -403,61 +403,141 @@ function extractStructuredContent(element) {
   try {
     console.log('Extracting structured content from element...');
     
-    // まず要素全体のテキストを取得し、改行で分割
-    const fullText = element.textContent || element.innerText || '';
-    if (fullText.trim()) {
-      // 改行で分割し、各行を個別のテキストブロックとして処理
-      const lines = fullText.split(/\n+/).filter(line => line.trim());
-      
-      lines.forEach(line => {
-        structuredContent.push({
-          type: 'text',
-          content: line.trim()
-        });
-      });
-    }
-    
-    // 画像を抽出
-    const images = element.querySelectorAll('img');
-    images.forEach(img => {
-      const src = img.src;
-      if (src && isValidImageUrl(src)) {
-        structuredContent.push({
-          type: 'image',
-          src: typeof isValidImageUrl(src) === 'string' ? isValidImageUrl(src) : src,
-          alt: img.alt && img.alt.trim() ? img.alt.trim() : '',
-          title: img.title && img.title.trim() ? img.title.trim() : '',
-          width: img.naturalWidth || img.width || 0,
-          height: img.naturalHeight || img.height || 0
-        });
-      }
-    });
-    
-    // リンクを抽出（テキストに含まれていないもののみ）
-    const links = element.querySelectorAll('a');
-    links.forEach(link => {
-      const linkText = link.textContent.trim();
-      const linkUrl = link.href;
-      
-      if (linkUrl && linkText && !linkUrl.startsWith('javascript:') && !linkUrl.startsWith('#')) {
-        // リンクテキストが既存のテキストに含まれていない場合のみ追加
-        const isIncluded = structuredContent.some(item => 
-          item.type === 'text' && item.content.includes(linkText)
-        );
-        
-        if (!isIncluded) {
-          structuredContent.push({
-            type: 'link',
-            url: linkUrl,
-            text: linkText,
-            title: link.title || ''
+    // DOMを順序通りに走査して、テキスト、画像、リンクの正確な順序を保持
+    const walkNodes = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent;
+        if (text && text.trim()) {
+          // テキストを改行で分割し、各行を個別のブロックとして追加
+          const lines = text.split(/\n/).map(line => line.trim()).filter(line => line);
+          lines.forEach(line => {
+            structuredContent.push({
+              type: 'text',
+              content: line
+            });
           });
         }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const tagName = node.tagName.toLowerCase();
+        
+        // 除外すべき要素をスキップ
+        if (node.classList.contains('action_area') || 
+            node.classList.contains('reactionbox') || 
+            node.classList.contains('editbox') ||
+            node.classList.contains('notion-save-icon')) {
+          return;
+        }
+        
+        if (tagName === 'img') {
+          // 画像要素を処理
+          const src = node.src;
+          if (src && isValidImageUrl(src)) {
+            structuredContent.push({
+              type: 'image',
+              src: typeof isValidImageUrl(src) === 'string' ? isValidImageUrl(src) : src,
+              alt: node.alt && node.alt.trim() ? node.alt.trim() : '',
+              title: node.title && node.title.trim() ? node.title.trim() : '',
+              width: node.naturalWidth || node.width || 0,
+              height: node.naturalHeight || node.height || 0
+            });
+          }
+        } else if (tagName === 'br') {
+          // 改行要素を明示的に処理
+          structuredContent.push({
+            type: 'linebreak'
+          });
+        } else if (tagName === 'p' || tagName === 'div') {
+          // ブロック要素の場合、子ノードを処理してから改行を追加
+          const hasContent = structuredContent.length > 0;
+          Array.from(node.childNodes).forEach(child => walkNodes(child));
+          
+          // ブロック要素の後に改行を追加（内容がある場合のみ）
+          if (hasContent && structuredContent.length > 0) {
+            const lastItem = structuredContent[structuredContent.length - 1];
+            if (lastItem.type !== 'linebreak') {
+              structuredContent.push({
+                type: 'linebreak'
+              });
+            }
+          }
+        } else if (tagName === 'a' && node.href) {
+          // リンク要素を処理
+          const linkText = node.textContent.trim();
+          const linkUrl = node.href;
+          
+          if (linkUrl && !linkUrl.startsWith('javascript:') && !linkUrl.startsWith('#')) {
+            // リンク内に画像がある場合
+            const linkImages = node.querySelectorAll('img');
+            if (linkImages.length > 0) {
+              linkImages.forEach(img => {
+                if (img.src && isValidImageUrl(img.src)) {
+                  structuredContent.push({
+                    type: 'image',
+                    src: typeof isValidImageUrl(img.src) === 'string' ? isValidImageUrl(img.src) : img.src,
+                    alt: img.alt || linkText || '',
+                    title: img.title || linkText || '',
+                    isLinked: true,
+                    linkUrl: linkUrl
+                  });
+                }
+              });
+            } else if (linkText) {
+              // テキストリンクの場合
+              structuredContent.push({
+                type: 'link',
+                url: linkUrl,
+                text: linkText,
+                title: node.title || ''
+              });
+            }
+          }
+        } else {
+          // その他の要素は子ノードを再帰的に処理
+          Array.from(node.childNodes).forEach(child => walkNodes(child));
+        }
       }
-    });
+    };
     
-    console.log(`Extracted ${structuredContent.length} structured content items:`, structuredContent);
-    return structuredContent;
+    // libecity.com特有の構造に対応
+    // .post_textクラスがある場合はそれを優先的に処理
+    const postTextElement = element.querySelector('.post_text');
+    if (postTextElement) {
+      console.log('Found .post_text element, processing it specifically');
+      Array.from(postTextElement.childNodes).forEach(child => walkNodes(child));
+    } else {
+      // 要素のすべての子ノードを順序通りに処理
+      Array.from(element.childNodes).forEach(child => walkNodes(child));
+    }
+    
+    // 連続する改行を整理し、最後の改行を削除
+    const cleanedContent = [];
+    for (let i = 0; i < structuredContent.length; i++) {
+      const current = structuredContent[i];
+      const next = structuredContent[i + 1];
+      
+      // 連続する改行をスキップ
+      if (current.type === 'linebreak' && next && next.type === 'linebreak') {
+        continue;
+      }
+      
+      // 最後の要素が改行の場合はスキップ
+      if (current.type === 'linebreak' && i === structuredContent.length - 1) {
+        continue;
+      }
+      
+      cleanedContent.push(current);
+    }
+    
+    console.log(`Extracted ${cleanedContent.length} structured content items (after cleanup):`, cleanedContent);
+    
+    // デバッグ用: 抽出されたコンテンツの概要を表示
+    const summary = cleanedContent.reduce((acc, item) => {
+      acc[item.type] = (acc[item.type] || 0) + 1;
+      return acc;
+    }, {});
+    console.log('Structured content summary:', summary);
+    
+    return cleanedContent;
     
   } catch (error) {
     console.error('Failed to extract structured content:', error);

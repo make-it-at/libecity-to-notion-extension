@@ -514,6 +514,20 @@ async function saveToNotion(databaseId, content) {
               console.warn('Invalid image URL skipped:', block.src);
             }
             break;
+            
+          case 'linebreak':
+            // 改行は空の段落として追加
+            children.push({
+              object: 'block',
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{
+                  type: 'text',
+                  text: { content: '' }
+                }]
+              }
+            });
+            break;
         }
         
         // 進捗ログ（50ブロックごと）
@@ -525,9 +539,9 @@ async function saveToNotion(databaseId, content) {
       console.log(`Generated ${children.length} Notion blocks from structured content`);
       
     } else {
-      console.log('Step 6b: No structured content found, processing text line by line...');
+      console.log('Step 6b: No structured content found, processing text and images separately...');
       
-      // チャット文章を行ごとに分割してブロック化（構造化コンテンツがない場合のみ）
+      // テキストを行ごとに処理
       if (text && text.trim()) {
         console.log('Processing text content line by line...');
         console.log(`Original text length: ${text.length} characters`);
