@@ -398,267 +398,294 @@ function extractTime(timeElement) {
 
 // HTML構造を解析してコンテンツの順序を抽出
 function extractStructuredContent(element) {
+  console.log('Starting structured content extraction...');
   const structuredContent = [];
   
-  try {
-    console.log('Extracting structured content from element...');
-    
-    // DOMを順序通りに走査して、テキスト、画像、リンクの正確な順序を保持
-    const walkNodes = (node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.textContent;
-        if (text) {
-          // テキストを改行で分割し、空白行も含めて忠実に反映
-          const lines = text.split(/\n/);
+  // 現在の文字修飾スタックを管理
+  const formatStack = [];
+  
+  const walkNodes = (node, currentFormats = {}) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent;
+      if (text) {
+        // テキストを改行で分割し、空白行も含めて忠実に反映
+        const lines = text.split(/\n/);
+        
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          const trimmedLine = line.trim();
           
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const trimmedLine = line.trim();
+          if (trimmedLine) {
+            // 内容のある行の場合
+            // テキスト内のURLを検出してリンク化
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const urlMatches = trimmedLine.match(urlRegex);
             
-            if (trimmedLine) {
-              // 内容のある行の場合
-              // テキスト内のURLを検出してリンク化
-              const urlRegex = /(https?:\/\/[^\s]+)/g;
-              const urlMatches = trimmedLine.match(urlRegex);
-              
-              if (urlMatches) {
-                // URLを含むテキストの場合、テキストとリンクを分離
-                let lastIndex = 0;
-                urlMatches.forEach(url => {
-                  const urlIndex = trimmedLine.indexOf(url, lastIndex);
-                  
-                  // URL前のテキスト
-                  if (urlIndex > lastIndex) {
-                    const beforeText = trimmedLine.substring(lastIndex, urlIndex).trim();
-                    if (beforeText) {
-                      structuredContent.push({
-                        type: 'text',
-                        content: beforeText
-                      });
-                    }
-                  }
-                  
-                  // URLをリンクとして追加
-                  structuredContent.push({
-                    type: 'link',
-                    url: url,
-                    text: url,
-                    title: ''
-                  });
-                  
-                  lastIndex = urlIndex + url.length;
-                });
+            if (urlMatches) {
+              // URLを含むテキストの場合、テキストとリンクを分離
+              let lastIndex = 0;
+              urlMatches.forEach(url => {
+                const urlIndex = trimmedLine.indexOf(url, lastIndex);
                 
-                // URL後のテキスト
-                if (lastIndex < trimmedLine.length) {
-                  const afterText = trimmedLine.substring(lastIndex).trim();
-                  if (afterText) {
+                // URL前のテキスト
+                if (urlIndex > lastIndex) {
+                  const beforeText = trimmedLine.substring(lastIndex, urlIndex).trim();
+                  if (beforeText) {
                     structuredContent.push({
-                      type: 'text',
-                      content: afterText
+                      type: 'rich_text',
+                      content: beforeText,
+                      annotations: { ...currentFormats }
                     });
                   }
                 }
-              } else {
-                // 通常のテキスト
+                
+                // URLをリンクとして追加
                 structuredContent.push({
-                  type: 'text',
-                  content: trimmedLine
+                  type: 'rich_text',
+                  content: url,
+                  annotations: { 
+                    ...currentFormats,
+                    underline: true,
+                    color: 'blue'
+                  },
+                  link: { url: url }
                 });
-              }
-            } else if (!trimmedLine) {
-              // 空白行の場合（空白文字のみの行も空白行として扱う）
-              structuredContent.push({
-                type: 'empty_line'
+                
+                lastIndex = urlIndex + url.length;
               });
-              console.log(`Added empty line at position ${i}`);
-            }
-            
-            // 行の終わりに改行を追加（最後の行以外）
-            if (i < lines.length - 1) {
-              structuredContent.push({
-                type: 'linebreak'
-              });
-            }
-          }
-        }
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        const tagName = node.tagName.toLowerCase();
-        
-        // 除外すべき要素をスキップ
-        if (node.classList.contains('action_area') || 
-            node.classList.contains('reactionbox') || 
-            node.classList.contains('editbox') ||
-            node.classList.contains('notion-save-icon')) {
-          return;
-        }
-        
-        if (tagName === 'img') {
-          // 画像要素を処理
-          const src = node.src;
-          if (src && isValidImageUrl(src)) {
-            structuredContent.push({
-              type: 'image',
-              src: typeof isValidImageUrl(src) === 'string' ? isValidImageUrl(src) : src,
-              alt: node.alt && node.alt.trim() ? node.alt.trim() : '',
-              title: node.title && node.title.trim() ? node.title.trim() : '',
-              width: node.naturalWidth || node.width || 0,
-              height: node.naturalHeight || node.height || 0
-            });
-          }
-        } else if (tagName === 'br') {
-          // 改行要素を明示的に処理
-          structuredContent.push({
-            type: 'linebreak'
-          });
-        } else if (tagName === 'p' || tagName === 'div') {
-          // ブロック要素の場合、子ノードを処理してから改行を追加
-          const hasContent = structuredContent.length > 0;
-          Array.from(node.childNodes).forEach(child => walkNodes(child));
-          
-          // ブロック要素の後に改行を追加（内容がある場合のみ）
-          if (hasContent && structuredContent.length > 0) {
-            const lastItem = structuredContent[structuredContent.length - 1];
-            if (lastItem.type !== 'linebreak') {
-              structuredContent.push({
-                type: 'linebreak'
-              });
-            }
-          }
-        } else if (tagName === 'a' && node.href) {
-          // リンク要素を処理
-          const linkText = node.textContent.trim();
-          const linkUrl = node.href;
-          
-          if (linkUrl && !linkUrl.startsWith('javascript:') && !linkUrl.startsWith('#')) {
-            // リンク内に画像がある場合
-            const linkImages = node.querySelectorAll('img');
-            if (linkImages.length > 0) {
-              linkImages.forEach(img => {
-                if (img.src && isValidImageUrl(img.src)) {
+              
+              // URL後のテキスト
+              if (lastIndex < trimmedLine.length) {
+                const afterText = trimmedLine.substring(lastIndex).trim();
+                if (afterText) {
                   structuredContent.push({
-                    type: 'image',
-                    src: typeof isValidImageUrl(img.src) === 'string' ? isValidImageUrl(img.src) : img.src,
-                    alt: img.alt || linkText || '',
-                    title: img.title || linkText || '',
-                    isLinked: true,
-                    linkUrl: linkUrl
+                    type: 'rich_text',
+                    content: afterText,
+                    annotations: { ...currentFormats }
                   });
                 }
-              });
-            } else if (linkText) {
-              // テキストリンクの場合
+              }
+            } else {
+              // 通常のテキスト
               structuredContent.push({
-                type: 'link',
-                url: linkUrl,
-                text: linkText,
-                title: node.title || ''
+                type: 'rich_text',
+                content: trimmedLine,
+                annotations: { ...currentFormats }
               });
             }
+          } else if (!trimmedLine) {
+            // 空白行の場合（空白文字のみの行も空白行として扱う）
+            structuredContent.push({
+              type: 'empty_line'
+            });
+            console.log(`Added empty line at position ${i}`);
           }
-        } else {
-          // その他の要素は子ノードを再帰的に処理
-          Array.from(node.childNodes).forEach(child => walkNodes(child));
+          
+          // 行の終わりに改行を追加（最後の行以外）
+          if (i < lines.length - 1) {
+            structuredContent.push({
+              type: 'linebreak'
+            });
+          }
         }
       }
-    };
-    
-    // libecity.com特有の構造に対応
-    // .post_textクラスがある場合はそれを優先的に処理
-    const postTextElement = element.querySelector('.post_text');
-    if (postTextElement) {
-      console.log('Found .post_text element, processing it specifically');
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const tagName = node.tagName.toLowerCase();
       
-      // libecity.comの特殊な構造に対応：<p></p>や<p><br></p>を空白行として検出
-      const paragraphs = postTextElement.querySelectorAll('p');
-      paragraphs.forEach((p, index) => {
-        const textContent = p.textContent.trim();
-        const hasOnlyBr = p.innerHTML.trim() === '<br>' || p.innerHTML.trim() === '';
-        
-        if (!textContent || hasOnlyBr) {
-          // 空白行として処理
-          structuredContent.push({
-            type: 'empty_line'
-          });
-          console.log(`Added empty line from <p> tag at index ${index}`);
-        } else {
-          // 通常の段落として処理
-          Array.from(p.childNodes).forEach(child => walkNodes(child));
-        }
-        
-        // 各段落の後に改行を追加（最後の段落以外）
-        if (index < paragraphs.length - 1) {
-          structuredContent.push({
-            type: 'linebreak'
-          });
-        }
-      });
+      // 除外すべき要素をスキップ
+      if (node.classList.contains('action_area') || 
+          node.classList.contains('reactionbox') || 
+          node.classList.contains('editbox') ||
+          node.classList.contains('notion-save-icon')) {
+        return;
+      }
       
-      // リンクプレビューも処理
-      const linkPreviews = element.querySelectorAll('.link_preview');
-      linkPreviews.forEach(preview => {
-        const linkUrl = preview.href;
-        const titleElement = preview.querySelector('.preview_title span');
-        const linkText = titleElement ? titleElement.textContent.trim() : linkUrl;
-        
-        if (linkUrl) {
+      // 文字修飾タグの処理
+      let newFormats = { ...currentFormats };
+      
+      switch (tagName) {
+        case 'strong':
+        case 'b':
+          newFormats.bold = true;
+          break;
+        case 'em':
+        case 'i':
+          newFormats.italic = true;
+          break;
+        case 'u':
+          newFormats.underline = true;
+          break;
+        case 's':
+        case 'strike':
+        case 'del':
+          newFormats.strikethrough = true;
+          break;
+        case 'code':
+          newFormats.code = true;
+          break;
+        case 'mark':
+          newFormats.color = 'yellow_background';
+          break;
+      }
+      
+      if (tagName === 'img') {
+        // 画像要素を処理
+        const src = node.src;
+        if (src && isValidImageUrl(src)) {
           structuredContent.push({
-            type: 'link',
-            url: linkUrl,
-            text: linkText,
-            title: linkText,
-            isPreview: true
+            type: 'image',
+            src: typeof isValidImageUrl(src) === 'string' ? isValidImageUrl(src) : src,
+            alt: node.alt && node.alt.trim() ? node.alt.trim() : '',
+            title: node.title && node.title.trim() ? node.title.trim() : '',
+            width: node.naturalWidth || node.width || 0,
+            height: node.naturalHeight || node.height || 0
           });
         }
-      });
-      
-    } else {
-      // 要素のすべての子ノードを順序通りに処理
-      Array.from(element.childNodes).forEach(child => walkNodes(child));
+      } else if (tagName === 'br') {
+        // 改行要素を明示的に処理
+        structuredContent.push({
+          type: 'linebreak'
+        });
+      } else if (tagName === 'p' || tagName === 'div') {
+        // ブロック要素の場合、子ノードを処理してから改行を追加
+        const hasContent = structuredContent.length > 0;
+        Array.from(node.childNodes).forEach(child => walkNodes(child, newFormats));
+        
+        // ブロック要素の後に改行を追加（内容がある場合のみ）
+        if (hasContent && structuredContent.length > 0) {
+          const lastItem = structuredContent[structuredContent.length - 1];
+          if (lastItem.type !== 'linebreak') {
+            structuredContent.push({
+              type: 'linebreak'
+            });
+          }
+        }
+      } else if (tagName === 'a' && node.href) {
+        // リンク要素を処理
+        const linkText = node.textContent.trim();
+        const linkUrl = node.href;
+        
+        if (linkUrl && !linkUrl.startsWith('javascript:') && !linkUrl.startsWith('#')) {
+          // リンク内に画像がある場合
+          const linkImages = node.querySelectorAll('img');
+          if (linkImages.length > 0) {
+            linkImages.forEach(img => {
+              if (img.src && isValidImageUrl(img.src)) {
+                structuredContent.push({
+                  type: 'image',
+                  src: typeof isValidImageUrl(img.src) === 'string' ? isValidImageUrl(img.src) : img.src,
+                  alt: img.alt || linkText || '',
+                  title: img.title || linkText || '',
+                  isLinked: true,
+                  linkUrl: linkUrl
+                });
+              }
+            });
+          } else if (linkText) {
+            // テキストリンクの場合
+            structuredContent.push({
+              type: 'rich_text',
+              content: linkText,
+              annotations: { 
+                ...newFormats,
+                underline: true,
+                color: 'blue'
+              },
+              link: { url: linkUrl }
+            });
+          }
+        }
+      } else {
+        // その他の要素は子ノードを再帰的に処理（文字修飾を継承）
+        Array.from(node.childNodes).forEach(child => walkNodes(child, newFormats));
+      }
     }
+  };
+
+  // libecity.com特有の構造に対応
+  // .post_textクラスがある場合はそれを優先的に処理
+  const postTextElement = element.querySelector('.post_text');
+  if (postTextElement) {
+    console.log('Found .post_text element, processing it specifically');
     
-    // 連続する改行を整理し、最後の改行を削除（空白行は保持）
-    const cleanedContent = [];
-    for (let i = 0; i < structuredContent.length; i++) {
-      const current = structuredContent[i];
-      const next = structuredContent[i + 1];
+    // libecity.comの特殊な構造に対応：<p></p>や<p><br></p>を空白行として検出
+    const paragraphs = postTextElement.querySelectorAll('p');
+    paragraphs.forEach((p, index) => {
+      const textContent = p.textContent.trim();
+      const hasOnlyBr = p.innerHTML.trim() === '<br>' || p.innerHTML.trim() === '';
       
-      // 空白行は常に保持
-      if (current.type === 'empty_line') {
-        cleanedContent.push(current);
-        continue;
+      if (!textContent || hasOnlyBr) {
+        // 空白行として処理
+        structuredContent.push({
+          type: 'empty_line'
+        });
+        console.log(`Added empty line from <p> tag at index ${index}`);
+      } else {
+        // 通常の段落として処理（文字修飾を含む）
+        Array.from(p.childNodes).forEach(child => walkNodes(child, {}));
       }
       
-      // 連続する改行をスキップ（ただし空白行は除く）
-      if (current.type === 'linebreak' && next && next.type === 'linebreak') {
-        continue;
+      // 各段落の後に改行を追加（最後の段落以外）
+      if (index < paragraphs.length - 1) {
+        structuredContent.push({
+          type: 'linebreak'
+        });
       }
+    });
+    
+    // リンクプレビューも処理
+    const linkPreviews = element.querySelectorAll('.link_preview');
+    linkPreviews.forEach(preview => {
+      const linkUrl = preview.href;
+      const titleElement = preview.querySelector('.preview_title span');
+      const linkText = titleElement ? titleElement.textContent.trim() : linkUrl;
       
-      // 最後の要素が改行の場合はスキップ
-      if (current.type === 'linebreak' && i === structuredContent.length - 1) {
-        continue;
+      if (linkUrl) {
+        structuredContent.push({
+          type: 'rich_text',
+          content: linkText,
+          annotations: { 
+            underline: true,
+            color: 'blue'
+          },
+          link: { url: linkUrl }
+        });
       }
-      
-      cleanedContent.push(current);
-    }
-    
-    console.log(`Cleaned content: ${cleanedContent.length} items (empty_lines: ${cleanedContent.filter(item => item.type === 'empty_line').length})`);
-    
-    console.log(`Extracted ${cleanedContent.length} structured content items (after cleanup):`, cleanedContent);
-    
-    // デバッグ用: 抽出されたコンテンツの概要を表示
-    const summary = cleanedContent.reduce((acc, item) => {
-      acc[item.type] = (acc[item.type] || 0) + 1;
-      return acc;
-    }, {});
-    console.log('Structured content summary:', summary);
-    
-    return cleanedContent;
-    
-  } catch (error) {
-    console.error('Failed to extract structured content:', error);
-    return [];
+    });
+  } else {
+    // 通常の要素処理
+    Array.from(element.childNodes).forEach(child => walkNodes(child, {}));
   }
+
+  // 連続する改行や空白行をクリーンアップ
+  const cleanedContent = [];
+  let lastType = null;
+  
+  structuredContent.forEach((item, index) => {
+    // 連続する改行を防ぐ
+    if (item.type === 'linebreak' && lastType === 'linebreak') {
+      return;
+    }
+    
+    // 最初や最後の改行は除去
+    if ((index === 0 || index === structuredContent.length - 1) && item.type === 'linebreak') {
+      return;
+    }
+    
+    cleanedContent.push(item);
+    lastType = item.type;
+  });
+
+  console.log(`Extracted ${cleanedContent.length} structured content items`);
+  
+  // デバッグ用：抽出された内容の概要をログ出力
+  const summary = cleanedContent.reduce((acc, item) => {
+    acc[item.type] = (acc[item.type] || 0) + 1;
+    return acc;
+  }, {});
+  console.log('Content structure summary:', summary);
+  
+  return cleanedContent;
 }
 
 // テキストのクリーニング（改行を保持）

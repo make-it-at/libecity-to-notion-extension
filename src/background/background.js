@@ -541,19 +541,39 @@ async function saveToNotion(databaseId, content) {
       structuredContent.forEach((block, index) => {
         switch (block.type) {
           case 'text':
-            // テキストを現在の段落に追加
+            // 旧形式のテキストを現在の段落に追加
             currentParagraph.push({
               type: 'text',
               text: { content: block.content }
             });
             break;
             
+          case 'rich_text':
+            // 新形式のrich_text（文字修飾付き）を現在の段落に追加
+            const richTextItem = {
+              type: 'text',
+              text: { content: block.content }
+            };
+            
+            // リンクがある場合は追加
+            if (block.link && block.link.url) {
+              richTextItem.text.link = { url: block.link.url };
+            }
+            
+            // 文字修飾（annotations）がある場合は追加
+            if (block.annotations && Object.keys(block.annotations).length > 0) {
+              richTextItem.annotations = { ...block.annotations };
+            }
+            
+            currentParagraph.push(richTextItem);
+            break;
+            
           case 'link':
-            // リンクを現在の段落に追加（Notion API正式形式）
+            // 旧形式のリンクを現在の段落に追加（Notion API正式形式）
             currentParagraph.push({
               type: 'text',
               text: { 
-                content: block.text,
+                content: block.text || block.content,
                 link: { url: block.url }
               },
               annotations: { 
