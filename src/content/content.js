@@ -921,7 +921,21 @@ async function extractElementContent(element) {
       content.author = authorElement.textContent.trim();
     }
 
-    // タイムスタンプの抽出（<time>タグを優先）
+    // チャットルーム名の抽出（Notionのタイトルプロパティ用）
+    const chatNameElement = document.querySelector('.chat_name') || 
+                           document.querySelector('[class*="chat_name"]') ||
+                           document.querySelector('[class*="room_name"]') ||
+                           document.querySelector('[class*="channel_name"]');
+    if (chatNameElement) {
+      content.chatRoomName = chatNameElement.textContent.trim();
+      console.log('Extracted chat room name:', content.chatRoomName);
+    } else {
+      // フォールバック: ページタイトルから抽出
+      content.chatRoomName = document.title || 'libecity チャット';
+      console.log('Using fallback chat room name:', content.chatRoomName);
+    }
+
+    // タイムスタンプの抽出（<time>タグを優先、時刻まで含めて取得）
     const timeElement = element.querySelector('time') ||
                        element.querySelector(SELECTORS.timestamp) || 
                        element.querySelector('[class*="time"]') || 
@@ -929,7 +943,19 @@ async function extractElementContent(element) {
                        element.querySelector('[datetime]');
     if (timeElement) {
       // datetime属性がある場合はそれを使用、なければテキストコンテンツ
-      content.timestamp = timeElement.getAttribute('datetime') || timeElement.textContent.trim();
+      let timestamp = timeElement.getAttribute('datetime') || timeElement.textContent.trim();
+      
+      // 時刻フォーマットを統一（YYYY/MM/DD HH:MM形式）
+      if (timestamp) {
+        // 様々な日時フォーマットに対応
+        const dateMatch = timestamp.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})/);
+        if (dateMatch) {
+          const [, year, month, day, hour, minute] = dateMatch;
+          content.timestamp = `${year}/${month.padStart(2, '0')}/${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute}`;
+        } else {
+          content.timestamp = timestamp;
+        }
+      }
       console.log('Extracted timestamp:', content.timestamp);
     }
 

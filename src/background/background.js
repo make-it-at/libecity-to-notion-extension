@@ -332,17 +332,17 @@ async function saveToNotion(databaseId, content) {
       hasUrl: !!content.url
     });
     
-    console.log('Step 1: Processing title...');
-    // コンテンツ構造に応じてデータを準備（詳細ログ付き）
-    let title = '無題の投稿';
-    if (content.title) {
+    console.log('Step 1: Processing title (chat room name)...');
+    // タイトルはチャットルーム名を使用
+    let title = 'libecity チャット';
+    if (content.chatRoomName) {
+      title = content.chatRoomName;
+    } else if (content.title) {
       title = content.title;
     } else if (content.content?.title) {
       title = content.content.title;
-    } else if (content.content?.text) {
-      title = content.content.text.substring(0, 100) + (content.content.text.length > 100 ? '...' : '');
     }
-    console.log('Extracted title:', title);
+    console.log('Extracted chat room name for title:', title);
     
     console.log('Step 2: Processing text content...');
     let text = '';
@@ -363,35 +363,62 @@ async function saveToNotion(databaseId, content) {
     const author = content.metadata?.author || content.author?.name || content.author || 'Unknown';
     const url = content.url || '';
     
-    console.log('Step 4: Processing date...');
-    // 日時の処理を改善
+    console.log('Step 4: Processing date with time...');
+    // 日時の処理を改善（時刻を含む）
     let date = null;
+    let dateTimeString = null;
+    
     if (content.timestamp) {
       try {
-        // "2025/06/22 18:32" 形式や "2025-06-22T18:32:00" 形式に対応
+        // "2025/06/23 07:00" 形式や "2025-06-22T18:32:00" 形式に対応
         let dateStr = content.timestamp;
+        console.log('Original timestamp:', dateStr);
         
-        // "2025/06/22 18:32" 形式を ISO 形式に変換
-        if (dateStr.match(/^\d{4}\/\d{2}\/\d{2}\s\d{2}:\d{2}$/)) {
-          dateStr = dateStr.replace(/\//g, '-').replace(' ', 'T') + ':00';
+        // "2025/06/23 07:00" 形式を ISO 形式に変換
+        if (dateStr.match(/^\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}$/)) {
+          // YYYY/MM/DD HH:MM 形式を YYYY-MM-DDTHH:MM:00 に変換
+          const parts = dateStr.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
+          if (parts) {
+            const [, year, month, day, hour, minute] = parts;
+            dateStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}:00`;
+            dateTimeString = `${year}/${month.padStart(2, '0')}/${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute}`;
+          }
         }
         
         const parsedDate = new Date(dateStr);
         if (!isNaN(parsedDate.getTime())) {
           date = parsedDate.toISOString();
+          if (!dateTimeString) {
+            // 表示用の日時文字列を生成
+            const localDate = new Date(parsedDate.getTime() + (parsedDate.getTimezoneOffset() * 60000));
+            dateTimeString = localDate.toLocaleString('ja-JP', {
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            }).replace(/\//g, '/').replace(',', '');
+          }
         } else {
           console.warn('Invalid date format:', content.timestamp);
           date = new Date().toISOString();
+          dateTimeString = new Date().toLocaleString('ja-JP');
         }
       } catch (error) {
         console.error('Date parsing error:', error);
         date = new Date().toISOString();
+        dateTimeString = new Date().toLocaleString('ja-JP');
       }
     } else if (content.metadata?.postTime?.timestamp) {
       date = content.metadata.postTime.timestamp;
+      dateTimeString = new Date(date).toLocaleString('ja-JP');
     } else {
       date = new Date().toISOString();
+      dateTimeString = new Date().toLocaleString('ja-JP');
     }
+    
+    console.log('Processed date:', { date, dateTimeString });
     
     console.log('Processed data:', { title, textLength: text.length, author, url, date });
     
@@ -436,7 +463,8 @@ async function saveToNotion(databaseId, content) {
         },
         Date: {
           date: date ? {
-            start: new Date(date).toISOString().split('T')[0]
+            start: date,
+            time_zone: 'Asia/Tokyo'
           } : null
         },
         Tags: {
