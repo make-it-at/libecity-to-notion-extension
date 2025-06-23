@@ -369,14 +369,15 @@ async function saveToNotion(databaseId, content) {
     let dateTimeString = null;
     
     if (content.timestampISO) {
-      // content.jsで既に適切にタイムゾーン処理されたISO形式がある場合
+      // content.jsで既に適切にタイムゾーン処理されたISO形式（+09:00付き）がある場合
+      // そのまま使用（追加の変換は不要）
       date = content.timestampISO;
       dateTimeString = content.timestamp; // 元の日本時間の表示をそのまま使用
-      console.log('Using pre-processed timestamp (no additional conversion):', { 
+      console.log('Using pre-processed timestamp (direct use):', { 
         iso: date, 
         display: dateTimeString, 
         timezone: content.timezone,
-        originalTimestamp: content.timestamp
+        note: 'No conversion needed - already in correct format'
       });
     } else if (content.timestamp) {
       try {

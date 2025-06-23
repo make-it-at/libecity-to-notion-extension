@@ -466,9 +466,8 @@ function extractStructuredContent(element) {
                   content: trimmedLine
                 });
               }
-            } else if (!trimmedLine && i < lines.length - 1) {
-              // 空白行の場合（最後の行でない場合のみ）
-              // 空白文字のみの行も空白行として扱う
+            } else if (!trimmedLine) {
+              // 空白行の場合（空白文字のみの行も空白行として扱う）
               structuredContent.push({
                 type: 'empty_line'
               });
@@ -569,7 +568,50 @@ function extractStructuredContent(element) {
     const postTextElement = element.querySelector('.post_text');
     if (postTextElement) {
       console.log('Found .post_text element, processing it specifically');
-      Array.from(postTextElement.childNodes).forEach(child => walkNodes(child));
+      
+      // libecity.comの特殊な構造に対応：<p></p>や<p><br></p>を空白行として検出
+      const paragraphs = postTextElement.querySelectorAll('p');
+      paragraphs.forEach((p, index) => {
+        const textContent = p.textContent.trim();
+        const hasOnlyBr = p.innerHTML.trim() === '<br>' || p.innerHTML.trim() === '';
+        
+        if (!textContent || hasOnlyBr) {
+          // 空白行として処理
+          structuredContent.push({
+            type: 'empty_line'
+          });
+          console.log(`Added empty line from <p> tag at index ${index}`);
+        } else {
+          // 通常の段落として処理
+          Array.from(p.childNodes).forEach(child => walkNodes(child));
+        }
+        
+        // 各段落の後に改行を追加（最後の段落以外）
+        if (index < paragraphs.length - 1) {
+          structuredContent.push({
+            type: 'linebreak'
+          });
+        }
+      });
+      
+      // リンクプレビューも処理
+      const linkPreviews = element.querySelectorAll('.link_preview');
+      linkPreviews.forEach(preview => {
+        const linkUrl = preview.href;
+        const titleElement = preview.querySelector('.preview_title span');
+        const linkText = titleElement ? titleElement.textContent.trim() : linkUrl;
+        
+        if (linkUrl) {
+          structuredContent.push({
+            type: 'link',
+            url: linkUrl,
+            text: linkText,
+            title: linkText,
+            isPreview: true
+          });
+        }
+      });
+      
     } else {
       // 要素のすべての子ノードを順序通りに処理
       Array.from(element.childNodes).forEach(child => walkNodes(child));
@@ -1017,53 +1059,32 @@ async function extractElementContent(element) {
       
       // 時刻フォーマットを統一（YYYY/MM/DD HH:MM形式）、タイムゾーン考慮
       if (timestamp) {
-        // 様々な日時フォーマットに対応
+        // libecity.comの時刻フォーマット（YYYY/MM/DD HH:MM）に対応
         const dateMatch = timestamp.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})/);
         if (dateMatch) {
           const [, year, month, day, hour, minute] = dateMatch;
           
-          // 日本時間として解釈（libecity.comは日本のサイトと仮定）
+          // 日本時間として表示用文字列を作成
           const localTimeString = `${year}/${month.padStart(2, '0')}/${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute}`;
           
-          // 日本時間としてDateオブジェクトを作成
-          const japanDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}:00+09:00`);
+          // 日本時間として明示的にISO文字列を作成（タイムゾーン +09:00 を明示）
+          const japanISOString = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}:00+09:00`;
           
           // タイムゾーン情報付きで保存
           content.timestamp = localTimeString;
-          content.timestampISO = japanDate.toISOString();
+          content.timestampISO = japanISOString;
           content.timezone = 'Asia/Tokyo';
           
-          console.log('Processed timestamp:', {
+          console.log('Processed libecity timestamp:', {
             original: timestamp,
             local: localTimeString,
             iso: content.timestampISO,
             timezone: content.timezone
           });
         } else {
-          // その他のフォーマットの場合もタイムゾーンを考慮
-          try {
-            const parsedDate = new Date(timestamp);
-            if (!isNaN(parsedDate.getTime())) {
-              // 既にタイムゾーン情報がある場合はそのまま、ない場合は日本時間として扱う
-              const hasTimezone = timestamp.includes('+') || timestamp.includes('Z') || timestamp.includes('GMT') || timestamp.includes('JST');
-              
-              if (!hasTimezone) {
-                // タイムゾーン情報がない場合は日本時間として扱う
-                const japanDate = new Date(parsedDate.getTime() + (9 * 60 * 60 * 1000)); // +9時間
-                content.timestampISO = japanDate.toISOString();
-              } else {
-                content.timestampISO = parsedDate.toISOString();
-              }
-              
-              content.timestamp = timestamp;
-              content.timezone = 'Asia/Tokyo';
-            } else {
-              content.timestamp = timestamp;
-            }
-          } catch (error) {
-            console.warn('Failed to parse timestamp:', timestamp, error);
-            content.timestamp = timestamp;
-          }
+          // その他のフォーマットの場合
+          console.warn('Unexpected timestamp format:', timestamp);
+          content.timestamp = timestamp;
         }
       }
       console.log('Extracted timestamp:', content.timestamp);
