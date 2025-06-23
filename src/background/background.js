@@ -445,7 +445,16 @@ async function saveToNotion(databaseId, content) {
       dateTimeString = `${year}/${month}/${day} ${hour}:${minute}`;
     }
     
-    console.log('Processed date with timezone:', { date, dateTimeString, timezone: 'Asia/Tokyo' });
+    console.log('Final date processing result:', { 
+      utcDate: date, 
+      displayString: dateTimeString, 
+      timezone: 'Asia/Tokyo',
+      originalContent: {
+        timestamp: content.timestamp,
+        timestampISO: content.timestampISO,
+        timezone: content.timezone
+      }
+    });
     
     console.log('Processed data:', { title, textLength: text.length, author, url, date });
     
@@ -509,6 +518,13 @@ async function saveToNotion(databaseId, content) {
     };
     
     console.log('Step 6: Processing children blocks...');
+    
+    // Notionに送信される日時データをログ出力
+    console.log('Date property that will be sent to Notion:', {
+      start: date,
+      time_zone: 'Asia/Tokyo',
+      expectedDisplay: dateTimeString
+    });
     // 子要素（構造化されたブロック生成）
     const children = [];
     

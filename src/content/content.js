@@ -1079,8 +1079,13 @@ async function extractElementContent(element) {
           console.log('Processed libecity timestamp:', {
             original: timestamp,
             local: localTimeString,
-            iso: content.timestampISO,
-            timezone: content.timezone
+            utcISO: utcISOString,
+            timezone: content.timezone,
+            verification: {
+              japanTime: `${year}/${month.padStart(2, '0')}/${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute}`,
+              utcTime: new Date(utcISOString).toISOString(),
+              backToJapan: new Date(utcISOString).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+            }
           });
         } else {
           // その他のフォーマットの場合
