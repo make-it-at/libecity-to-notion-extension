@@ -363,24 +363,30 @@ async function saveToNotion(databaseId, content) {
     const author = content.metadata?.author || content.author?.name || content.author || 'Unknown';
     const url = content.url || '';
     
-    console.log('Step 4: Processing date with time...');
-    // 日時の処理を改善（時刻を含む）
+    console.log('Step 4: Processing date with timezone consideration...');
+    // 日時の処理を改善（時刻を含む、タイムゾーン考慮）
     let date = null;
     let dateTimeString = null;
     
-    if (content.timestamp) {
+    if (content.timestampISO) {
+      // content.jsで既に適切にタイムゾーン処理されたISO形式がある場合
+      date = content.timestampISO;
+      dateTimeString = content.timestamp;
+      console.log('Using pre-processed timestamp:', { iso: date, display: dateTimeString, timezone: content.timezone });
+    } else if (content.timestamp) {
       try {
         // "2025/06/23 07:00" 形式や "2025-06-22T18:32:00" 形式に対応
         let dateStr = content.timestamp;
         console.log('Original timestamp:', dateStr);
         
-        // "2025/06/23 07:00" 形式を ISO 形式に変換
+        // "2025/06/23 07:00" 形式を ISO 形式に変換（日本時間として扱う）
         if (dateStr.match(/^\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}$/)) {
-          // YYYY/MM/DD HH:MM 形式を YYYY-MM-DDTHH:MM:00 に変換
+          // YYYY/MM/DD HH:MM 形式を YYYY-MM-DDTHH:MM:00+09:00 に変換
           const parts = dateStr.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
           if (parts) {
             const [, year, month, day, hour, minute] = parts;
-            dateStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}:00`;
+            // 日本時間として明示的にタイムゾーンを指定
+            dateStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}:00+09:00`;
             dateTimeString = `${year}/${month.padStart(2, '0')}/${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute}`;
           }
         }
@@ -389,9 +395,9 @@ async function saveToNotion(databaseId, content) {
         if (!isNaN(parsedDate.getTime())) {
           date = parsedDate.toISOString();
           if (!dateTimeString) {
-            // 表示用の日時文字列を生成
-            const localDate = new Date(parsedDate.getTime() + (parsedDate.getTimezoneOffset() * 60000));
-            dateTimeString = localDate.toLocaleString('ja-JP', {
+            // 日本時間での表示用文字列を生成
+            const japanTime = new Date(parsedDate.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+            dateTimeString = japanTime.toLocaleString('ja-JP', {
               year: 'numeric',
               month: '2-digit',
               day: '2-digit',
@@ -403,22 +409,22 @@ async function saveToNotion(databaseId, content) {
         } else {
           console.warn('Invalid date format:', content.timestamp);
           date = new Date().toISOString();
-          dateTimeString = new Date().toLocaleString('ja-JP');
+          dateTimeString = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
         }
       } catch (error) {
         console.error('Date parsing error:', error);
         date = new Date().toISOString();
-        dateTimeString = new Date().toLocaleString('ja-JP');
+        dateTimeString = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
       }
     } else if (content.metadata?.postTime?.timestamp) {
       date = content.metadata.postTime.timestamp;
-      dateTimeString = new Date(date).toLocaleString('ja-JP');
+      dateTimeString = new Date(date).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
     } else {
       date = new Date().toISOString();
-      dateTimeString = new Date().toLocaleString('ja-JP');
+      dateTimeString = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
     }
     
-    console.log('Processed date:', { date, dateTimeString });
+    console.log('Processed date with timezone:', { date, dateTimeString, timezone: 'Asia/Tokyo' });
     
     console.log('Processed data:', { title, textLength: text.length, author, url, date });
     
@@ -560,6 +566,32 @@ async function saveToNotion(databaseId, content) {
               currentParagraph = [];
             }
             break;
+            
+          case 'empty_line':
+            // 空白行の場合、現在の段落を完成させてから空の段落を追加
+            if (currentParagraph.length > 0) {
+              children.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: { rich_text: currentParagraph }
+              });
+              currentParagraph = [];
+            }
+            
+            // 空白行を空の段落として追加
+            children.push({
+              object: 'block',
+              type: 'paragraph',
+              paragraph: { 
+                rich_text: [
+                  {
+                    type: 'text',
+                    text: { content: ' ' } // 完全に空ではなく、スペース1つを入れる
+                  }
+                ]
+              }
+            });
+            break;
         }
         
         // 最後のブロックの場合、残った段落を追加
@@ -587,18 +619,17 @@ async function saveToNotion(databaseId, content) {
         console.log('Processing text content line by line...');
         console.log(`Original text length: ${text.length} characters`);
         
-        // 改行で分割（\n, \r\n, <br>タグなど）
+        // 改行で分割（\n, \r\n, <br>タグなど）、空白行も保持
         const lines = text
           .replace(/<br\s*\/?>/gi, '\n')  // <br>タグを改行に変換
           .replace(/\r\n/g, '\n')         // Windows改行を統一
           .replace(/\r/g, '\n')           // Mac改行を統一
           .split('\n')
-          .map(line => line.trim())
-          .filter(line => line.length > 0); // 空行を除外
+          .map(line => line.trim()); // 空行は除外しない
         
         console.log(`Split text into ${lines.length} lines`);
         
-        // 各行を個別の段落ブロックとして追加
+        // 各行を個別の段落ブロックとして追加（空白行も含む）
         lines.forEach((line, index) => {
           if (line.length > 0) {
             // 行内にリンクが含まれているかチェック
@@ -679,6 +710,20 @@ async function saveToNotion(databaseId, content) {
             if ((index + 1) % 100 === 0) {
               console.log(`Processed ${index + 1}/${lines.length} lines`);
             }
+          } else {
+            // 空白行の場合
+            children.push({
+              object: 'block',
+              type: 'paragraph',
+              paragraph: { 
+                rich_text: [
+                  {
+                    type: 'text',
+                    text: { content: ' ' } // 完全に空ではなく、スペース1つを入れる
+                  }
+                ]
+              }
+            });
           }
         });
         

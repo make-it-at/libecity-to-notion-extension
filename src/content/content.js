@@ -407,60 +407,79 @@ function extractStructuredContent(element) {
     const walkNodes = (node) => {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.textContent;
-        if (text && text.trim()) {
-          // テキストを改行で分割し、各行を個別のブロックとして追加
-          const lines = text.split(/\n/).map(line => line.trim()).filter(line => line);
-          lines.forEach(line => {
-            // テキスト内のURLを検出してリンク化
-            const urlRegex = /(https?:\/\/[^\s]+)/g;
-            const urlMatches = line.match(urlRegex);
+        if (text) {
+          // テキストを改行で分割し、空白行も含めて忠実に反映
+          const lines = text.split(/\n/);
+          
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmedLine = line.trim();
             
-            if (urlMatches) {
-              // URLを含むテキストの場合、テキストとリンクを分離
-              let lastIndex = 0;
-              urlMatches.forEach(url => {
-                const urlIndex = line.indexOf(url, lastIndex);
+            if (trimmedLine) {
+              // 内容のある行の場合
+              // テキスト内のURLを検出してリンク化
+              const urlRegex = /(https?:\/\/[^\s]+)/g;
+              const urlMatches = trimmedLine.match(urlRegex);
+              
+              if (urlMatches) {
+                // URLを含むテキストの場合、テキストとリンクを分離
+                let lastIndex = 0;
+                urlMatches.forEach(url => {
+                  const urlIndex = trimmedLine.indexOf(url, lastIndex);
+                  
+                  // URL前のテキスト
+                  if (urlIndex > lastIndex) {
+                    const beforeText = trimmedLine.substring(lastIndex, urlIndex).trim();
+                    if (beforeText) {
+                      structuredContent.push({
+                        type: 'text',
+                        content: beforeText
+                      });
+                    }
+                  }
+                  
+                  // URLをリンクとして追加
+                  structuredContent.push({
+                    type: 'link',
+                    url: url,
+                    text: url,
+                    title: ''
+                  });
+                  
+                  lastIndex = urlIndex + url.length;
+                });
                 
-                // URL前のテキスト
-                if (urlIndex > lastIndex) {
-                  const beforeText = line.substring(lastIndex, urlIndex).trim();
-                  if (beforeText) {
+                // URL後のテキスト
+                if (lastIndex < trimmedLine.length) {
+                  const afterText = trimmedLine.substring(lastIndex).trim();
+                  if (afterText) {
                     structuredContent.push({
                       type: 'text',
-                      content: beforeText
+                      content: afterText
                     });
                   }
                 }
-                
-                // URLをリンクとして追加
+              } else {
+                // 通常のテキスト
                 structuredContent.push({
-                  type: 'link',
-                  url: url,
-                  text: url,
-                  title: ''
+                  type: 'text',
+                  content: trimmedLine
                 });
-                
-                lastIndex = urlIndex + url.length;
-              });
-              
-              // URL後のテキスト
-              if (lastIndex < line.length) {
-                const afterText = line.substring(lastIndex).trim();
-                if (afterText) {
-                  structuredContent.push({
-                    type: 'text',
-                    content: afterText
-                  });
-                }
               }
-            } else {
-              // 通常のテキスト
+            } else if (line === '' && i < lines.length - 1) {
+              // 空白行の場合（最後の行でない場合のみ）
               structuredContent.push({
-                type: 'text',
-                content: line
+                type: 'empty_line'
               });
             }
-          });
+            
+            // 行の終わりに改行を追加（最後の行以外）
+            if (i < lines.length - 1) {
+              structuredContent.push({
+                type: 'linebreak'
+              });
+            }
+          }
         }
       } else if (node.nodeType === Node.ELEMENT_NODE) {
         const tagName = node.tagName.toLowerCase();
@@ -922,20 +941,61 @@ async function extractElementContent(element) {
     }
 
     // チャットルーム名の抽出（Notionのタイトルプロパティ用）
-    const chatNameElement = document.querySelector('.chat_name') || 
-                           document.querySelector('[class*="chat_name"]') ||
-                           document.querySelector('[class*="room_name"]') ||
-                           document.querySelector('[class*="channel_name"]');
+    // 投稿要素から上位に向かってチャットルーム名を探す
+    let chatNameElement = null;
+    let currentElement = element;
+    
+    // 投稿要素内からチャットルーム名を探す
+    chatNameElement = element.querySelector('.chat_name') || 
+                     element.querySelector('[class*="chat_name"]') ||
+                     element.querySelector('[class*="room_name"]') ||
+                     element.querySelector('[class*="channel_name"]');
+    
+    // 投稿要素内にない場合は、親要素を遡って探す
+    if (!chatNameElement) {
+      while (currentElement && currentElement !== document.body) {
+        currentElement = currentElement.parentElement;
+        if (currentElement) {
+          chatNameElement = currentElement.querySelector('.chat_name') || 
+                           currentElement.querySelector('[class*="chat_name"]') ||
+                           currentElement.querySelector('[class*="room_name"]') ||
+                           currentElement.querySelector('[class*="channel_name"]');
+          if (chatNameElement) break;
+        }
+      }
+    }
+    
+    // 最後にページ全体から探す
+    if (!chatNameElement) {
+      chatNameElement = document.querySelector('.chat_name') || 
+                       document.querySelector('[class*="chat_name"]') ||
+                       document.querySelector('[class*="room_name"]') ||
+                       document.querySelector('[class*="channel_name"]');
+    }
+    
     if (chatNameElement) {
       content.chatRoomName = chatNameElement.textContent.trim();
       console.log('Extracted chat room name:', content.chatRoomName);
     } else {
-      // フォールバック: ページタイトルから抽出
-      content.chatRoomName = document.title || 'libecity チャット';
+      // フォールバック: ページタイトルから抽出またはURL解析
+      let fallbackName = 'libecity チャット';
+      
+      // ページタイトルからチャット名を抽出を試行
+      if (document.title && document.title !== 'libecity') {
+        fallbackName = document.title;
+      }
+      
+      // URLからチャット情報を抽出を試行
+      const urlMatch = window.location.href.match(/chat[_-]?(\w+)/i);
+      if (urlMatch) {
+        fallbackName = `${fallbackName} (${urlMatch[1]})`;
+      }
+      
+      content.chatRoomName = fallbackName;
       console.log('Using fallback chat room name:', content.chatRoomName);
     }
 
-    // タイムスタンプの抽出（<time>タグを優先、時刻まで含めて取得）
+    // タイムスタンプの抽出（<time>タグを優先、時刻まで含めて取得、タイムゾーン考慮）
     const timeElement = element.querySelector('time') ||
                        element.querySelector(SELECTORS.timestamp) || 
                        element.querySelector('[class*="time"]') || 
@@ -945,15 +1005,55 @@ async function extractElementContent(element) {
       // datetime属性がある場合はそれを使用、なければテキストコンテンツ
       let timestamp = timeElement.getAttribute('datetime') || timeElement.textContent.trim();
       
-      // 時刻フォーマットを統一（YYYY/MM/DD HH:MM形式）
+      // 時刻フォーマットを統一（YYYY/MM/DD HH:MM形式）、タイムゾーン考慮
       if (timestamp) {
         // 様々な日時フォーマットに対応
         const dateMatch = timestamp.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})/);
         if (dateMatch) {
           const [, year, month, day, hour, minute] = dateMatch;
-          content.timestamp = `${year}/${month.padStart(2, '0')}/${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute}`;
+          
+          // 日本時間として解釈（libecity.comは日本のサイトと仮定）
+          const localTimeString = `${year}/${month.padStart(2, '0')}/${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute}`;
+          
+          // 日本時間としてDateオブジェクトを作成
+          const japanDate = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${hour.padStart(2, '0')}:${minute}:00+09:00`);
+          
+          // タイムゾーン情報付きで保存
+          content.timestamp = localTimeString;
+          content.timestampISO = japanDate.toISOString();
+          content.timezone = 'Asia/Tokyo';
+          
+          console.log('Processed timestamp:', {
+            original: timestamp,
+            local: localTimeString,
+            iso: content.timestampISO,
+            timezone: content.timezone
+          });
         } else {
-          content.timestamp = timestamp;
+          // その他のフォーマットの場合もタイムゾーンを考慮
+          try {
+            const parsedDate = new Date(timestamp);
+            if (!isNaN(parsedDate.getTime())) {
+              // 既にタイムゾーン情報がある場合はそのまま、ない場合は日本時間として扱う
+              const hasTimezone = timestamp.includes('+') || timestamp.includes('Z') || timestamp.includes('GMT') || timestamp.includes('JST');
+              
+              if (!hasTimezone) {
+                // タイムゾーン情報がない場合は日本時間として扱う
+                const japanDate = new Date(parsedDate.getTime() + (9 * 60 * 60 * 1000)); // +9時間
+                content.timestampISO = japanDate.toISOString();
+              } else {
+                content.timestampISO = parsedDate.toISOString();
+              }
+              
+              content.timestamp = timestamp;
+              content.timezone = 'Asia/Tokyo';
+            } else {
+              content.timestamp = timestamp;
+            }
+          } catch (error) {
+            console.warn('Failed to parse timestamp:', timestamp, error);
+            content.timestamp = timestamp;
+          }
         }
       }
       console.log('Extracted timestamp:', content.timestamp);
