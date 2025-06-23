@@ -371,8 +371,13 @@ async function saveToNotion(databaseId, content) {
     if (content.timestampISO) {
       // content.jsで既に適切にタイムゾーン処理されたISO形式がある場合
       date = content.timestampISO;
-      dateTimeString = content.timestamp;
-      console.log('Using pre-processed timestamp:', { iso: date, display: dateTimeString, timezone: content.timezone });
+      dateTimeString = content.timestamp; // 元の日本時間の表示をそのまま使用
+      console.log('Using pre-processed timestamp (no additional conversion):', { 
+        iso: date, 
+        display: dateTimeString, 
+        timezone: content.timezone,
+        originalTimestamp: content.timestamp
+      });
     } else if (content.timestamp) {
       try {
         // "2025/06/23 07:00" 形式や "2025-06-22T18:32:00" 形式に対応
@@ -395,14 +400,8 @@ async function saveToNotion(databaseId, content) {
         if (!isNaN(parsedDate.getTime())) {
           date = parsedDate.toISOString();
           if (!dateTimeString) {
-            // 日本時間での表示用文字列を生成（先頭0を保持）
-            const japanTime = new Date(parsedDate.getTime());
-            const year = japanTime.getFullYear();
-            const month = String(japanTime.getMonth() + 1).padStart(2, '0');
-            const day = String(japanTime.getDate()).padStart(2, '0');
-            const hour = String(japanTime.getHours()).padStart(2, '0');
-            const minute = String(japanTime.getMinutes()).padStart(2, '0');
-            dateTimeString = `${year}/${month}/${day} ${hour}:${minute}`;
+            // 元のタイムスタンプをそのまま表示用として使用
+            dateTimeString = content.timestamp || 'Unknown time';
           }
         } else {
           console.warn('Invalid date format:', content.timestamp);
