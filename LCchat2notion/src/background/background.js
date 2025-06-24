@@ -917,28 +917,58 @@ async function saveToNotion(databaseId, content) {
       }
     }
     
-    console.log('Step 9: Finalizing page data...');
-    console.log(`Total blocks generated: ${children.length}`);
+    console.log('Step 9: Final validation and cleanup of blocks...');
+    
+    // 最終的な画像ブロックの検証とクリーンアップ
+    const cleanedChildren = [];
+    let removedImageBlocks = 0;
+    
+    for (const block of children) {
+      if (block.type === 'image') {
+        const imageUrl = block.image?.external?.url;
+        if (imageUrl && isValidNotionImageUrl(imageUrl)) {
+          cleanedChildren.push(block);
+        } else {
+          console.warn('Removing invalid image block:', imageUrl);
+          removedImageBlocks++;
+          imageFailures.push({
+            url: imageUrl || 'Unknown URL',
+            alt: block.image?.caption?.[0]?.text?.content || '画像',
+            reason: '最終検証で無効と判定'
+          });
+        }
+      } else {
+        // 画像以外のブロックはそのまま追加
+        cleanedChildren.push(block);
+      }
+    }
+    
+    if (removedImageBlocks > 0) {
+      console.log(`Removed ${removedImageBlocks} invalid image blocks during final validation`);
+    }
+    
+    console.log('Step 10: Finalizing page data...');
+    console.log(`Total blocks after cleanup: ${cleanedChildren.length} (removed ${removedImageBlocks} invalid images)`);
     
     // 子要素が存在する場合のみ追加（制限を緩和）
-    if (children.length > 0) {
+    if (cleanedChildren.length > 0) {
       // Notion APIの制限: 1回のリクエストで最大100個のブロックまで
       const maxBlocksPerRequest = 100;
       
-      if (children.length <= maxBlocksPerRequest) {
+      if (cleanedChildren.length <= maxBlocksPerRequest) {
         // 制限内の場合はそのまま追加
-        pageData.children = children;
+        pageData.children = cleanedChildren;
         console.log(`Added ${pageData.children.length} children blocks`);
       } else {
         // 制限を超える場合は分割処理
-        console.log(`Large content detected: ${children.length} blocks. Using batch processing.`);
+        console.log(`Large content detected: ${cleanedChildren.length} blocks. Using batch processing.`);
         
         // 最初のバッチ（ページ作成時）
-        pageData.children = children.slice(0, maxBlocksPerRequest);
+        pageData.children = cleanedChildren.slice(0, maxBlocksPerRequest);
         console.log(`Added initial ${pageData.children.length} children blocks (batch 1)`);
         
         // 残りのブロックは後で追加する予定をログに記録
-        const remainingBlocks = children.length - maxBlocksPerRequest;
+        const remainingBlocks = cleanedChildren.length - maxBlocksPerRequest;
         console.log(`${remainingBlocks} blocks will be added in subsequent requests`);
       }
     } else {
@@ -965,9 +995,9 @@ async function saveToNotion(databaseId, content) {
       const page = await response.json();
       
       // 残りのブロックがある場合は追加で送信
-      if (children.length > 100) {
+      if (cleanedChildren.length > 100) {
         console.log('Adding remaining blocks to the created page...');
-        const remainingBlocks = children.slice(100);
+        const remainingBlocks = cleanedChildren.slice(100);
         const addBlocksResult = await addBlocksToPage(page.id, remainingBlocks);
         
         if (addBlocksResult.success) {
@@ -991,7 +1021,7 @@ async function saveToNotion(databaseId, content) {
         success: true,
         pageId: page.id,
         pageUrl: page.url,
-        totalBlocks: children.length,
+        totalBlocks: cleanedChildren.length,
         imageFailures: imageFailures.length > 0 ? imageFailures : null
       };
     } else {
@@ -1021,9 +1051,49 @@ async function saveToNotion(databaseId, content) {
           errorMessage = 'データベースのプロパティ設定に問題があります。新しいデータベースを作成してください。';
         }
         
-        // 画像URLエラーの場合
+        // 画像URLエラーの場合（改善されたエラー処理）
         if (error.message.includes('Invalid image url')) {
-          errorMessage = '無効な画像URLが含まれています。画像を除外して再試行してください。';
+          errorMessage = '画像の保存に失敗しました。テキストと他の要素は保存されました。';
+          
+          // 画像なしで再試行
+          try {
+            console.log('Retrying without image blocks...');
+            const nonImagePageData = { ...adjustedPageData };
+            if (nonImagePageData.children) {
+              nonImagePageData.children = nonImagePageData.children.filter(block => block.type !== 'image');
+              
+              // 画像ブロックをカウント
+              const imageBlockCount = adjustedPageData.children.length - nonImagePageData.children.length;
+              if (imageBlockCount > 0) {
+                imageFailures.push({
+                  url: 'Multiple image URLs',
+                  alt: '複数の画像',
+                  reason: 'Notion APIで拒否されました'
+                });
+              }
+              
+              const retryResponse = await makeNotionRequest('/pages', 'POST', nonImagePageData);
+              if (retryResponse.ok) {
+                const retryPage = await retryResponse.json();
+                console.log('Retry without images successful');
+                
+                await updateStats({ 
+                  totalSaved: 1,
+                  lastSaved: Date.now()
+                });
+                
+                return {
+                  success: true,
+                  pageId: retryPage.id,
+                  pageUrl: retryPage.url,
+                  totalBlocks: nonImagePageData.children.length,
+                  imageFailures: imageFailures.length > 0 ? imageFailures : null
+                };
+              }
+            }
+          } catch (retryError) {
+            console.error('Retry without images also failed:', retryError);
+          }
         }
       }
       
@@ -1151,7 +1221,7 @@ async function getSettings() {
   }
 }
 
-// Notion用画像URL検証関数（強化版）
+// Notion用画像URL検証関数（改良版）
 function isValidNotionImageUrl(url) {
   try {
     // 基本的なURL形式チェック
@@ -1159,6 +1229,9 @@ function isValidNotionImageUrl(url) {
       console.log('Invalid URL: not a string or empty');
       return false;
     }
+    
+    // 詳細ログ出力
+    console.log('Validating image URL:', url);
     
     // data:URLは除外（Notionは外部URLのみサポート）
     if (url.startsWith('data:')) {
@@ -1178,9 +1251,9 @@ function isValidNotionImageUrl(url) {
       return false;
     }
     
-    // HTTPSで始まる必要がある（セキュリティ強化）
-    if (!url.startsWith('https://')) {
-      console.log('Invalid URL: not HTTPS');
+    // HTTP/HTTPSで始まる必要がある
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      console.log('Invalid URL: not HTTP/HTTPS');
       return false;
     }
     
@@ -1190,16 +1263,17 @@ function isValidNotionImageUrl(url) {
       return false;
     }
     
-    // 問題のあるパターンを除外
+    // 問題のあるパターンを除外（より厳密に）
     const problematicPatterns = [
       'emojione',
-      'emoji',
-      '.svg',
-      'icon.png',
-      'favicon'
+      'emoji.png',
+      'emoji.gif',
+      'favicon.ico',
+      'favicon.png',
+      '.svg'  // SVGは一般的に問題を起こしやすい
     ];
     
-    if (problematicPatterns.some(pattern => url.includes(pattern))) {
+    if (problematicPatterns.some(pattern => url.toLowerCase().includes(pattern.toLowerCase()))) {
       console.log('Invalid URL: contains problematic pattern');
       return false;
     }
@@ -1210,25 +1284,6 @@ function isValidNotionImageUrl(url) {
     // ホスト名が存在する必要がある
     if (!urlObj.hostname) {
       console.log('Invalid URL: no hostname');
-      return false;
-    }
-    
-    // 許可されたドメインのみ（セキュリティ強化）
-    const allowedDomains = [
-      'firebasestorage.googleapis.com',
-      'storage.googleapis.com',
-      'imgur.com',
-      'i.imgur.com',
-      'libecity.com',
-      'images.weserv.nl'  // プロキシサービス
-    ];
-    
-    const isAllowedDomain = allowedDomains.some(domain => 
-      urlObj.hostname === domain || urlObj.hostname.endsWith('.' + domain)
-    );
-    
-    if (!isAllowedDomain) {
-      console.log('Invalid URL: domain not allowed:', urlObj.hostname);
       return false;
     }
     
@@ -1245,10 +1300,27 @@ function isValidNotionImageUrl(url) {
       return false;
     }
     
+    // 画像拡張子のチェック（より柔軟に）
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+    const hasImageExtension = imageExtensions.some(ext => 
+      url.toLowerCase().includes(ext)
+    );
+    
+    // 画像拡張子がない場合は警告だが許可（動的画像URLに対応）
+    if (!hasImageExtension) {
+      console.warn('URL may not be an image (no image extension):', url);
+      // 但し、明らかに画像でないURLは除外
+      if (url.includes('.html') || url.includes('.js') || url.includes('.css') || url.includes('.xml')) {
+        console.log('Invalid URL: non-image file extension');
+        return false;
+      }
+    }
+    
+    console.log('URL validation passed:', url);
     return true;
     
   } catch (error) {
-    console.warn('URL validation error:', error.message);
+    console.warn('URL validation error:', error.message, 'URL:', url);
     return false;
   }
 }
