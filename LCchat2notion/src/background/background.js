@@ -975,10 +975,54 @@ async function saveToNotion(databaseId, content) {
       console.log('No children blocks to add');
     }
     
+    // 画像保存失敗がある場合、Notionページの最上部にコールアウトを追加
+    if (imageFailures.length > 0) {
+      console.log(`Adding image failure callout to Notion page (${imageFailures.length} failures)`);
+      
+      const calloutBlock = {
+        object: 'block',
+        type: 'callout',
+        callout: {
+          icon: {
+            type: 'emoji',
+            emoji: '⚠️'
+          },
+          color: 'orange',
+          rich_text: [
+            {
+              type: 'text',
+              text: {
+                content: `画像保存エラー: ${imageFailures.length}個の画像が保存できませんでした`
+              },
+              annotations: {
+                bold: true
+              }
+            },
+            {
+              type: 'text',
+              text: {
+                content: '\n\nテキストと他の要素は正常に保存されています。画像が必要な場合は、手動でアップロードしてください。'
+              }
+            }
+          ]
+        }
+      };
+      
+      // コールアウトをページの最上部に挿入
+      if (cleanedChildren.length > 0) {
+        cleanedChildren.unshift(calloutBlock);
+        pageData.children = cleanedChildren.slice(0, 100); // 最初の100ブロック
+      } else {
+        pageData.children = [calloutBlock];
+      }
+      
+      console.log('Added image failure callout block to page');
+    }
+    
     // データベースのスキーマを確認してプロパティを調整
     const adjustedPageData = await adjustPropertiesForDatabase(databaseId, pageData);
     
-    console.log('Step 10: Making API call to Notion...');
+    console.log('Step 11: Making API call to Notion...');
     // ページを作成（ログを簡素化）
     console.log('Creating Notion page with data summary:', {
       hasTitle: !!adjustedPageData.properties?.Title,
@@ -995,9 +1039,12 @@ async function saveToNotion(databaseId, content) {
       const page = await response.json();
       
       // 残りのブロックがある場合は追加で送信
-      if (cleanedChildren.length > 100) {
+      const totalBlocks = cleanedChildren.length + (imageFailures.length > 0 ? 1 : 0); // コールアウトブロック分を考慮
+      if (totalBlocks > 100) {
         console.log('Adding remaining blocks to the created page...');
-        const remainingBlocks = cleanedChildren.slice(100);
+        // コールアウトブロックがある場合は99個目から、ない場合は100個目から
+        const startIndex = imageFailures.length > 0 ? 99 : 100;
+        const remainingBlocks = cleanedChildren.slice(startIndex);
         const addBlocksResult = await addBlocksToPage(page.id, remainingBlocks);
         
         if (addBlocksResult.success) {
@@ -1055,45 +1102,78 @@ async function saveToNotion(databaseId, content) {
         if (error.message.includes('Invalid image url')) {
           errorMessage = '画像の保存に失敗しました。テキストと他の要素は保存されました。';
           
-          // 画像なしで再試行
-          try {
-            console.log('Retrying without image blocks...');
-            const nonImagePageData = { ...adjustedPageData };
-            if (nonImagePageData.children) {
-              nonImagePageData.children = nonImagePageData.children.filter(block => block.type !== 'image');
-              
-              // 画像ブロックをカウント
-              const imageBlockCount = adjustedPageData.children.length - nonImagePageData.children.length;
-              if (imageBlockCount > 0) {
-                imageFailures.push({
-                  url: 'Multiple image URLs',
-                  alt: '複数の画像',
-                  reason: 'Notion APIで拒否されました'
-                });
-              }
-              
-              const retryResponse = await makeNotionRequest('/pages', 'POST', nonImagePageData);
-              if (retryResponse.ok) {
-                const retryPage = await retryResponse.json();
-                console.log('Retry without images successful');
-                
-                await updateStats({ 
-                  totalSaved: 1,
-                  lastSaved: Date.now()
-                });
-                
-                return {
-                  success: true,
-                  pageId: retryPage.id,
-                  pageUrl: retryPage.url,
-                  totalBlocks: nonImagePageData.children.length,
-                  imageFailures: imageFailures.length > 0 ? imageFailures : null
-                };
-              }
-            }
-          } catch (retryError) {
-            console.error('Retry without images also failed:', retryError);
-          }
+                     // 画像なしで再試行
+           try {
+             console.log('Retrying without image blocks...');
+             const nonImagePageData = { ...adjustedPageData };
+             if (nonImagePageData.children) {
+               nonImagePageData.children = nonImagePageData.children.filter(block => block.type !== 'image');
+               
+               // 画像ブロックをカウント
+               const imageBlockCount = adjustedPageData.children.length - nonImagePageData.children.length;
+               if (imageBlockCount > 0) {
+                 imageFailures.push({
+                   url: 'Multiple image URLs',
+                   alt: '複数の画像',
+                   reason: 'Notion APIで拒否されました'
+                 });
+               }
+               
+               // リトライ時もコールアウトを追加
+               const calloutBlock = {
+                 object: 'block',
+                 type: 'callout',
+                 callout: {
+                   icon: {
+                     type: 'emoji',
+                     emoji: '⚠️'
+                   },
+                   color: 'orange',
+                   rich_text: [
+                     {
+                       type: 'text',
+                       text: {
+                         content: `画像保存エラー: ${imageFailures.length}個の画像が保存できませんでした`
+                       },
+                       annotations: {
+                         bold: true
+                       }
+                     },
+                     {
+                       type: 'text',
+                       text: {
+                         content: '\n\nテキストと他の要素は正常に保存されています。画像が必要な場合は、手動でアップロードしてください。'
+                       }
+                     }
+                   ]
+                 }
+               };
+               
+               // コールアウトをページの最上部に挿入
+               nonImagePageData.children.unshift(calloutBlock);
+               
+               const retryResponse = await makeNotionRequest('/pages', 'POST', nonImagePageData);
+               if (retryResponse.ok) {
+                 const retryPage = await retryResponse.json();
+                 console.log('Retry without images successful');
+                 
+                 await updateStats({ 
+                   totalSaved: 1,
+                   lastSaved: Date.now()
+                 });
+                 
+                 return {
+                   success: true,
+                   pageId: retryPage.id,
+                   pageUrl: retryPage.url,
+                   totalBlocks: nonImagePageData.children.length,
+                   imageFailures: imageFailures.length > 0 ? imageFailures : null
+                 };
+               }
+             }
+           } catch (retryError) {
+             console.error('Retry without images also failed:', retryError);
+           }
         }
       }
       
