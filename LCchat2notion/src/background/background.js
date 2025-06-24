@@ -32,6 +32,10 @@ const DEFAULT_DATABASE_SCHEMA = {
     type: 'rich_text',
     rich_text: {}
   },
+  Chat: {
+    type: 'rich_text',
+    rich_text: {}
+  },
   Date: {
     type: 'date',
     date: {}
@@ -500,6 +504,18 @@ async function saveToNotion(databaseId, content) {
     
     console.log('Processed data:', { title, textLength: text.length, author, url, date });
     
+    // URLの検証とフォールバック処理
+    let finalUrl = url;
+    if (!finalUrl || finalUrl.trim() === '') {
+      finalUrl = 'https://libecity.com';
+      console.warn('URL is empty, using fallback URL:', finalUrl);
+    } else if (!finalUrl.startsWith('http')) {
+      finalUrl = `https://libecity.com${finalUrl}`;
+      console.log('Converted relative URL to absolute:', finalUrl);
+    }
+    
+    console.log('Final URL for Notion:', finalUrl);
+    
     console.log('Step 5: Creating page data structure...');
     const pageData = {
       parent: {
@@ -517,7 +533,7 @@ async function saveToNotion(databaseId, content) {
           ]
         },
         URL: {
-          url: url || 'https://libecity.com'
+          url: finalUrl
         },
         Author: {
           rich_text: [
@@ -568,6 +584,11 @@ async function saveToNotion(databaseId, content) {
       expectedDisplay: dateTimeString,
       approach: 'UTC time without timezone - Notion auto-converts to user timezone'
     });
+    
+    // 画像検出の統計を追跡
+    let totalImagesDetected = 0;
+    let validImagesProcessed = 0;
+    
     // 子要素（構造化されたブロック生成）
     const children = [];
     
@@ -636,6 +657,10 @@ async function saveToNotion(databaseId, content) {
               currentParagraph = [];
             }
             
+            // 画像統計を更新
+            totalImagesDetected++;
+            console.log(`Processing image ${totalImagesDetected}: ${block.src}`);
+            
             // 画像ブロックを追加
             if (isValidNotionImageUrl(block.src)) {
               children.push({
@@ -650,12 +675,14 @@ async function saveToNotion(databaseId, content) {
                   }] : []
                 }
               });
+              validImagesProcessed++;
+              console.log(`Valid image added: ${validImagesProcessed}/${totalImagesDetected}`);
             } else {
               console.warn('Invalid image URL skipped:', block.src);
               imageFailures.push({
                 url: block.src,
                 alt: block.alt || '画像',
-                reason: '無効なURL形式'
+                reason: '無効なURL形式（構造化コンテンツ）'
               });
             }
             break;
@@ -839,15 +866,18 @@ async function saveToNotion(databaseId, content) {
       // 画像の追加（構造化コンテンツがない場合のみ）
       const images = content.content?.images || content.images || [];
       if (images.length > 0) {
-        console.log(`Processing ${images.length} images for Notion`);
+        console.log(`Processing ${images.length} separate images for Notion`);
         
         // 有効な画像のみを処理
         const validImages = images.filter(image => {
+          totalImagesDetected++;
+          console.log(`Processing separate image ${totalImagesDetected}: ${image.src || 'No URL'}`);
+          
           if (!image.src) {
             imageFailures.push({
               url: image.src || 'URLなし',
               alt: image.alt || '画像',
-              reason: 'URLが空です'
+              reason: 'URLが空です（別画像処理）'
             });
             return false;
           }
@@ -857,10 +887,11 @@ async function saveToNotion(databaseId, content) {
             imageFailures.push({
               url: image.src,
               alt: image.alt || '画像',
-              reason: '無効なURL形式'
+              reason: '無効なURL形式（別画像処理）'
             });
+            return false;
           }
-          return isValid;
+          return true;
         });
         
         if (validImages.length > 0) {
@@ -903,7 +934,8 @@ async function saveToNotion(databaseId, content) {
               }
             });
             
-            console.log(`Added image ${index + 1}: ${image.src.substring(0, 50)}...`);
+            validImagesProcessed++;
+            console.log(`Added separate image ${index + 1}: ${image.src.substring(0, 50)}... (${validImagesProcessed}/${totalImagesDetected} total)`);
           });
           
           if (validImages.length > 10) {
@@ -913,15 +945,17 @@ async function saveToNotion(databaseId, content) {
           console.log('No valid images found after filtering');
         }
       } else {
-        console.log('No images found in content');
+        console.log('No separate images found in content');
       }
     }
     
     console.log('Step 9: Final validation and cleanup of blocks...');
+    console.log(`Image processing summary: ${totalImagesDetected} detected, ${validImagesProcessed} valid, ${imageFailures.length} failed`);
     
-    // 最終的な画像ブロックの検証とクリーンアップ
+    // 最終的な画像ブロックの検証とクリーンアップ（重複除去）
     const cleanedChildren = [];
     let removedImageBlocks = 0;
+    const finalImageFailures = []; // 最終検証での失敗のみ記録
     
     for (const block of children) {
       if (block.type === 'image') {
@@ -929,9 +963,9 @@ async function saveToNotion(databaseId, content) {
         if (imageUrl && isValidNotionImageUrl(imageUrl)) {
           cleanedChildren.push(block);
         } else {
-          console.warn('Removing invalid image block:', imageUrl);
+          console.warn('Removing invalid image block during final validation:', imageUrl);
           removedImageBlocks++;
-          imageFailures.push({
+          finalImageFailures.push({
             url: imageUrl || 'Unknown URL',
             alt: block.image?.caption?.[0]?.text?.content || '画像',
             reason: '最終検証で無効と判定'
@@ -943,12 +977,19 @@ async function saveToNotion(databaseId, content) {
       }
     }
     
+    // 最終検証での失敗を追加（重複を避けるため）
+    if (finalImageFailures.length > 0) {
+      imageFailures.push(...finalImageFailures);
+      console.log(`Added ${finalImageFailures.length} final validation failures to imageFailures`);
+    }
+    
     if (removedImageBlocks > 0) {
       console.log(`Removed ${removedImageBlocks} invalid image blocks during final validation`);
     }
     
     console.log('Step 10: Finalizing page data...');
     console.log(`Total blocks after cleanup: ${cleanedChildren.length} (removed ${removedImageBlocks} invalid images)`);
+    console.log(`Final image statistics: ${totalImagesDetected} detected, ${validImagesProcessed} successfully processed, ${imageFailures.length} total failures`);
     
     // 子要素が存在する場合のみ追加（制限を緩和）
     if (cleanedChildren.length > 0) {
@@ -976,8 +1017,9 @@ async function saveToNotion(databaseId, content) {
     }
     
     // 画像保存失敗がある場合、Notionページの最上部にコールアウトを追加
-    if (imageFailures.length > 0) {
-      console.log(`Adding image failure callout to Notion page (${imageFailures.length} failures)`);
+    if (totalImagesDetected > 0 && validImagesProcessed < totalImagesDetected) {
+      const failedImageCount = totalImagesDetected - validImagesProcessed;
+      console.log(`Adding image failure callout to Notion page (${failedImageCount} of ${totalImagesDetected} images failed)`);
       
       const calloutBlock = {
         object: 'block',
@@ -992,7 +1034,7 @@ async function saveToNotion(databaseId, content) {
             {
               type: 'text',
               text: {
-                content: `画像保存エラー: ${imageFailures.length}個の画像が保存できませんでした`
+                content: `画像保存エラー: ${totalImagesDetected}個中${failedImageCount}個の画像が保存できませんでした`
               },
               annotations: {
                 bold: true
@@ -1001,7 +1043,9 @@ async function saveToNotion(databaseId, content) {
             {
               type: 'text',
               text: {
-                content: '\n\nテキストと他の要素は正常に保存されています。画像が必要な場合は、手動でアップロードしてください。'
+                content: validImagesProcessed > 0 
+                  ? `\n\n${validImagesProcessed}個の画像は正常に保存されました。テキストと他の要素も正常に保存されています。`
+                  : '\n\nテキストと他の要素は正常に保存されています。画像が必要な場合は、手動でアップロードしてください。'
               }
             }
           ]
@@ -1069,7 +1113,12 @@ async function saveToNotion(databaseId, content) {
         pageId: page.id,
         pageUrl: page.url,
         totalBlocks: cleanedChildren.length,
-        imageFailures: imageFailures.length > 0 ? imageFailures : null
+        imageFailures: totalImagesDetected > validImagesProcessed ? {
+          detected: totalImagesDetected,
+          successful: validImagesProcessed,
+          failed: totalImagesDetected - validImagesProcessed,
+          details: imageFailures
+        } : null
       };
     } else {
       const error = await response.json();
@@ -1120,6 +1169,7 @@ async function saveToNotion(databaseId, content) {
                }
                
                // リトライ時もコールアウトを追加
+               const failedImageCount = totalImagesDetected - validImagesProcessed;
                const calloutBlock = {
                  object: 'block',
                  type: 'callout',
@@ -1133,7 +1183,7 @@ async function saveToNotion(databaseId, content) {
                      {
                        type: 'text',
                        text: {
-                         content: `画像保存エラー: ${imageFailures.length}個の画像が保存できませんでした`
+                         content: `画像保存エラー: ${totalImagesDetected}個中${failedImageCount}個の画像が保存できませんでした`
                        },
                        annotations: {
                          bold: true
@@ -1142,7 +1192,9 @@ async function saveToNotion(databaseId, content) {
                      {
                        type: 'text',
                        text: {
-                         content: '\n\nテキストと他の要素は正常に保存されています。画像が必要な場合は、手動でアップロードしてください。'
+                         content: validImagesProcessed > 0 
+                           ? `\n\n${validImagesProcessed}個の画像は正常に保存されました。テキストと他の要素も正常に保存されています。`
+                           : '\n\nテキストと他の要素は正常に保存されています。画像が必要な場合は、手動でアップロードしてください。'
                        }
                      }
                    ]
@@ -1167,7 +1219,12 @@ async function saveToNotion(databaseId, content) {
                    pageId: retryPage.id,
                    pageUrl: retryPage.url,
                    totalBlocks: nonImagePageData.children.length,
-                   imageFailures: imageFailures.length > 0 ? imageFailures : null
+                   imageFailures: totalImagesDetected > validImagesProcessed ? {
+                     detected: totalImagesDetected,
+                     successful: validImagesProcessed,
+                     failed: totalImagesDetected - validImagesProcessed,
+                     details: imageFailures
+                   } : null
                  };
                }
              }
@@ -1212,6 +1269,13 @@ async function adjustPropertiesForDatabase(databaseId, pageData) {
     Object.entries(pageData.properties).forEach(([key, value]) => {
       if (dbProperties[key]) {
         adjustedProperties[key] = value;
+        if (key === 'URL') {
+          console.log(`URL property adjusted:`, {
+            originalValue: value,
+            dbPropertyType: dbProperties[key].type,
+            finalValue: adjustedProperties[key]
+          });
+        }
       } else {
         console.warn(`Property '${key}' does not exist in database, skipping`);
       }

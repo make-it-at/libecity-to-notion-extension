@@ -5,11 +5,11 @@ console.log('LibeCity to Notion Content Script loaded');
 
 // libecity.com専用のセレクタ定義
 const SELECTORS = {
-  // 投稿関連
-  postContainer: '.log_detail',
+  // 投稿関連（article[data-id]を最優先に）
+  postContainer: 'article[data-id]',
   postText: '.post_text',
-  postTime: '.post_time, .time',
-  postAuthor: '.user_name, .author',
+  postTime: '.post_time, .time, time',
+  postAuthor: 'a.username, .username, .user_name, .author',
   postAvatar: '.user_proficon img, .avatar img',
   
   // 画像関連（libecity.com固有のセレクタを追加）
@@ -23,7 +23,10 @@ const SELECTORS = {
   
   // その他
   reactions: '.reaction, .like_count',
-  replies: '.reply, .comment'
+  replies: '.reply, .comment',
+  
+  // ユーザー情報（後方互換性のため）
+  userInfo: 'a.username, .username, .user_name, .author'
 };
 
 // セレクタの有効性をチェックする関数
@@ -183,29 +186,64 @@ async function extractSpecificContent(selector) {
 // 投稿URLの取得
 async function extractPostUrl(postElement) {
   try {
+    console.log('Starting post URL extraction...');
+    
     // 方法1: データ属性から投稿IDを取得
     const postId = postElement.getAttribute('data-id') || 
                    postElement.getAttribute('data-post-id') ||
+                   postElement.getAttribute('data-message-id') ||
                    postElement.getAttribute('id');
     
-    if (postId) {
-      return `https://libecity.com/post/${postId}`;
+    if (postId && postId.match(/^[a-zA-Z0-9]+$/)) {
+      // libecity.comのcomment_id形式に対応（英数字の組み合わせ）
+      const currentUrl = window.location.href;
+      let constructedUrl;
+      
+      if (currentUrl.includes('room_list')) {
+        // room_listページの場合、comment_idパラメータを使用
+        const urlObj = new URL(currentUrl);
+        urlObj.searchParams.set('comment_id', postId);
+        constructedUrl = urlObj.toString();
+      } else {
+        // その他の場合は従来の形式
+        constructedUrl = `https://libecity.com/post/${postId}`;
+      }
+      
+      console.log('Constructed URL from data attribute:', constructedUrl);
+      return constructedUrl;
     }
     
-    // 方法2: 投稿内のリンクボタンを探す（複数のセレクタを試行）
+    // 方法2: 投稿内の既存リンクを探す（直接リンク）
+    const existingLinks = postElement.querySelectorAll('a[href*="libecity.com"], a[href*="/post/"]');
+    for (const link of existingLinks) {
+      const href = link.getAttribute('href');
+      if (href && href.includes('/post/')) {
+        const fullUrl = href.startsWith('http') ? href : `https://libecity.com${href}`;
+        console.log('Found existing post link:', fullUrl);
+        return fullUrl;
+      }
+    }
+    
+    // 方法3: 投稿内のリンクボタンを探す（複数のセレクタを試行）
     const linkButtonSelectors = [
       '.btn_gray svg[data-icon="link"]',
       '.btn svg[data-icon="link"]', 
       'svg[data-icon="link"]',
       '.fa-link',
-      '[class*="link"]'
+      '[class*="link"]',
+      '.share-button',
+      '[title*="リンク"]',
+      '[title*="link"]'
     ];
     
     let linkButton = null;
     for (const selector of linkButtonSelectors) {
       const element = postElement.querySelector(selector);
       if (element) {
-        linkButton = element.closest('li') || element.closest('button') || element.closest('[class*="btn"]');
+        linkButton = element.closest('li') || 
+                    element.closest('button') || 
+                    element.closest('[class*="btn"]') ||
+                    element.closest('[class*="share"]');
         if (linkButton) {
           console.log('Found link button with selector:', selector);
           break;
@@ -216,31 +254,51 @@ async function extractPostUrl(postElement) {
     if (linkButton) {
       // リンクボタンのクリックをシミュレートしてURLを取得
       const urlFromButton = await getUrlFromLinkButton(linkButton, postElement);
-      if (urlFromButton && urlFromButton !== window.location.href) {
+      if (urlFromButton && urlFromButton !== window.location.href && urlFromButton.includes('libecity.com')) {
+        console.log('Extracted URL from link button:', urlFromButton);
         return urlFromButton;
       }
     }
     
-    // 方法3: 投稿内の時刻リンクを探す
-    const timeLink = postElement.querySelector('.post_time a, .time a, a[href*="/post/"]');
+    // 方法4: 投稿内の時刻リンクを探す
+    const timeLink = postElement.querySelector('.post_time a, .time a, a[href*="/post/"], time a');
     if (timeLink) {
       const href = timeLink.getAttribute('href');
       if (href) {
-        return href.startsWith('http') ? href : `https://libecity.com${href}`;
+        const fullUrl = href.startsWith('http') ? href : `https://libecity.com${href}`;
+        console.log('Found time link:', fullUrl);
+        return fullUrl;
       }
     }
     
-    // 方法4: 投稿の構造から推測
-    const postContainer = postElement.closest('[data-id], [id]');
-    if (postContainer) {
-      const id = postContainer.getAttribute('data-id') || postContainer.getAttribute('id');
-      if (id && id.match(/^\d+$/)) {
-        return `https://libecity.com/post/${id}`;
+    // 方法5: 投稿の構造から推測（親要素を含む）
+    let currentElement = postElement;
+    for (let i = 0; i < 3; i++) { // 最大3階層まで遡る
+      if (currentElement) {
+        const id = currentElement.getAttribute('data-id') || currentElement.getAttribute('id');
+        if (id && id.match(/^\d+$/)) {
+          const constructedUrl = `https://libecity.com/post/${id}`;
+          console.log('Constructed URL from parent element:', constructedUrl);
+          return constructedUrl;
+        }
+        currentElement = currentElement.parentElement;
       }
     }
     
-    // 方法5: 現在のページURLを使用（最後の手段）
-    return window.location.href;
+    // 方法6: URLからチャット情報を含む一意のURLを生成
+    const currentUrl = window.location.href;
+    const timestamp = Date.now();
+    const postHash = generatePostHash(postElement);
+    
+    if (currentUrl.includes('libecity.com')) {
+      const uniqueUrl = `${currentUrl}#post-${postHash}-${timestamp}`;
+      console.log('Generated unique URL:', uniqueUrl);
+      return uniqueUrl;
+    }
+    
+    // 方法7: 現在のページURLを使用（最後の手段）
+    console.log('Using current page URL as fallback:', currentUrl);
+    return currentUrl;
     
   } catch (error) {
     console.error('Failed to extract post URL:', error);
@@ -248,19 +306,49 @@ async function extractPostUrl(postElement) {
   }
 }
 
+// 投稿のハッシュ値を生成（一意性を高めるため）
+function generatePostHash(postElement) {
+  try {
+    const text = postElement.textContent || '';
+    const author = postElement.querySelector('a.username')?.textContent || 
+                   postElement.querySelector('.username')?.textContent ||
+                   postElement.querySelector('.user_name')?.textContent || '';
+    const timestamp = postElement.querySelector('time')?.textContent || '';
+    
+    const content = `${text}-${author}-${timestamp}`.substring(0, 100);
+    
+    // 簡単なハッシュ生成
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+      const char = content.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // 32bit整数に変換
+    }
+    
+    return Math.abs(hash).toString(16);
+  } catch (error) {
+    console.error('Failed to generate post hash:', error);
+    return Math.random().toString(16).substring(2, 8);
+  }
+}
+
 // リンクボタンからURLを取得
 function getUrlFromLinkButton(linkButton, postElement) {
   return new Promise((resolve) => {
     try {
+      console.log('Attempting to get URL from link button...');
+      
       // クリップボードの監視を開始
       let originalClipboard = '';
       
       // 現在のクリップボード内容を保存
       navigator.clipboard.readText().then(text => {
-        originalClipboard = text;
+        originalClipboard = text || '';
+        console.log('Original clipboard content:', originalClipboard.substring(0, 50) + '...');
       }).catch(() => {
         // クリップボード読み取りに失敗した場合は空文字列
         originalClipboard = '';
+        console.log('Failed to read original clipboard, using empty string');
       });
       
       // リンクボタンをクリック
@@ -270,21 +358,30 @@ function getUrlFromLinkButton(linkButton, postElement) {
         view: window
       });
       
+      console.log('Clicking link button...');
       linkButton.dispatchEvent(clickEvent);
       
       // 少し待ってからクリップボードを確認
       setTimeout(() => {
         navigator.clipboard.readText().then(clipboardText => {
-          if (clipboardText && clipboardText !== originalClipboard && clipboardText.includes('libecity.com')) {
-            resolve(clipboardText);
+          console.log('Clipboard after click:', clipboardText ? clipboardText.substring(0, 50) + '...' : 'empty');
+          
+          if (clipboardText && 
+              clipboardText !== originalClipboard && 
+              clipboardText.includes('libecity.com') &&
+              clipboardText.startsWith('http')) {
+            console.log('Successfully extracted URL from clipboard:', clipboardText);
+            resolve(clipboardText.trim());
           } else {
+            console.log('No valid URL found in clipboard, using fallback');
             // フォールバック: 現在のページURL
             resolve(window.location.href);
           }
-        }).catch(() => {
+        }).catch((error) => {
+          console.error('Failed to read clipboard after click:', error);
           resolve(window.location.href);
         });
-      }, 500);
+      }, 800); // 待機時間を少し長くする
       
     } catch (error) {
       console.error('Failed to get URL from link button:', error);
@@ -911,17 +1008,23 @@ function setupChatPostMonitoring() {
       if (mutation.type === 'childList') {
         mutation.addedNodes.forEach((node) => {
           if (node.nodeType === Node.ELEMENT_NODE) {
-            // 新しい投稿が追加された場合
-            const newPosts = node.querySelectorAll ? node.querySelectorAll(SELECTORS.postContainer) : [];
+            // 新しい投稿が追加された場合（article[data-id]を優先）
+            let newPosts = node.querySelectorAll ? node.querySelectorAll('article[data-id]') : [];
+            
+            // article[data-id]が見つからない場合は.log_detailも確認
+            if (newPosts.length === 0) {
+              newPosts = node.querySelectorAll ? node.querySelectorAll('.log_detail') : [];
+            }
+            
             if (newPosts.length > 0) {
               console.log(`New posts detected: ${newPosts.length}`);
               setTimeout(() => addNotionIconsToPosts(), 500); // 少し遅延させて確実に追加
             }
             
             // 追加されたノード自体が投稿の場合
-            if (node.matches && node.matches(SELECTORS.postContainer)) {
+            if (node.matches && (node.matches('article[data-id]') || node.matches('.log_detail'))) {
               console.log('New post element detected');
-              setTimeout(() => addNotionIconToPost(node), 500);
+              setTimeout(() => addNotionIconsToPosts(), 500); // 全体を再処理
             }
           }
         });
@@ -940,13 +1043,53 @@ function setupChatPostMonitoring() {
 // 全ての投稿にNotionアイコンを追加
 function addNotionIconsToPosts() {
   try {
-    const posts = document.querySelectorAll(SELECTORS.postContainer);
+    // まず既存のアイコンを全て削除
+    const existingIcons = document.querySelectorAll('.notion-save-icon');
+    existingIcons.forEach(icon => icon.remove());
+    console.log(`Removed ${existingIcons.length} existing icons`);
+    
+    // article[data-id]を優先して取得
+    let posts = document.querySelectorAll('article[data-id]');
+    
+    // article[data-id]が見つからない場合は.log_detailを使用
+    if (posts.length === 0) {
+      posts = document.querySelectorAll('.log_detail');
+      console.log('Using .log_detail selector as fallback');
+    } else {
+      console.log('Using article[data-id] selector');
+    }
+    
     console.log(`Found ${posts.length} posts to add Notion icons`);
     
-    posts.forEach((post, index) => {
-      // 既にアイコンが追加されているかチェック
-      if (!post.querySelector('.notion-save-icon')) {
-        addNotionIconToPost(post, index);
+    // 各投稿に対して重複チェックを行いながらアイコンを追加
+    const processedElements = new Set();
+    
+    Array.from(posts).forEach((post, index) => {
+      // 要素の一意性を確認（data-idまたは要素自体で判定）
+      const postId = post.getAttribute('data-id') || `element-${index}`;
+      
+      if (!processedElements.has(postId)) {
+        processedElements.add(postId);
+        
+        // 親子関係をチェックして重複を避ける
+        let shouldAdd = true;
+        processedElements.forEach(existingId => {
+          const existingElement = document.querySelector(`[data-id="${existingId}"]`) || 
+                                  Array.from(posts).find((p, i) => `element-${i}` === existingId);
+          if (existingElement && existingElement !== post) {
+            // 親子関係にある場合はスキップ
+            if (post.contains(existingElement) || existingElement.contains(post)) {
+              shouldAdd = false;
+              console.log(`Skipping duplicate post ${postId} due to parent-child relationship`);
+            }
+          }
+        });
+        
+        if (shouldAdd) {
+          addNotionIconToPost(post, index);
+        }
+      } else {
+        console.log(`Skipping duplicate post ${postId}`);
       }
     });
   } catch (error) {
@@ -966,13 +1109,13 @@ function addNotionIconToPost(postElement, index = 0) {
     const iconContainer = document.createElement('div');
     iconContainer.className = 'notion-save-icon';
     iconContainer.innerHTML = `
-      <div class="notion-icon-tooltip">Notionに保存</div>
-      <svg viewBox="0 0 24 24" width="18" height="18">
+      <svg viewBox="0 0 24 24" width="14" height="14">
         <path fill="currentColor" d="M4,6H2V20A2,2 0 0,0 4,22H18V20H4V6M20,2H8A2,2 0 0,0 6,4V16A2,2 0 0,0 8,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H8V4H20V16M16,6H18V8H16V6M16,9H18V11H16V9M16,12H18V14H16V12M11,9H15V11H11V9M11,12H15V14H11V12M11,6H15V8H11V6Z"/>
       </svg>
+      <span>Notionに保存</span>
     `;
     
-    // スタイルを設定
+    // スタイルを設定（削除されたアイコンの位置・大きさに調整）
     iconContainer.style.cssText = `
       position: absolute;
       top: 8px;
@@ -996,11 +1139,8 @@ function addNotionIconToPost(postElement, index = 0) {
     iconContainer.addEventListener('mouseenter', () => {
       iconContainer.style.background = '#667eea';
       iconContainer.style.color = 'white';
-      iconContainer.style.transform = 'scale(1.1)';
+      iconContainer.style.transform = 'scale(1.05)';
       iconContainer.style.boxShadow = '0 4px 8px rgba(102, 126, 234, 0.3)';
-      
-      const tooltip = iconContainer.querySelector('.notion-icon-tooltip');
-      tooltip.style.display = 'block';
     });
     
     iconContainer.addEventListener('mouseleave', () => {
@@ -1008,9 +1148,6 @@ function addNotionIconToPost(postElement, index = 0) {
       iconContainer.style.color = '#666';
       iconContainer.style.transform = 'scale(1)';
       iconContainer.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
-      
-      const tooltip = iconContainer.querySelector('.notion-icon-tooltip');
-      tooltip.style.display = 'none';
     });
     
     // クリックイベント
@@ -1020,14 +1157,50 @@ function addNotionIconToPost(postElement, index = 0) {
       await handleNotionSave(postElement, iconContainer);
     });
     
-    // 投稿要素に相対位置を設定
-    const computedStyle = window.getComputedStyle(postElement);
-    if (computedStyle.position === 'static') {
-      postElement.style.position = 'relative';
+        // time要素を探して、その左側に配置
+    const timeElement = postElement.querySelector('time');
+    if (timeElement) {
+      // time要素に直接相対位置を設定
+      const computedStyle = window.getComputedStyle(timeElement);
+      if (computedStyle.position === 'static') {
+        timeElement.style.position = 'relative';
+      }
+      
+      // time要素のすぐ左側に配置するためのスタイル調整
+      iconContainer.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: -120px;
+        height: 100%;
+        padding: 0 8px;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #666;
+        transition: all 0.2s ease;
+        z-index: 1000;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        font-size: 12px;
+        white-space: nowrap;
+        gap: 4px;
+      `;
+      
+      // time要素にアイコンを追加
+      timeElement.appendChild(iconContainer);
+    } else {
+      // time要素が見つからない場合は従来の位置（投稿要素の右上）
+      const computedStyle = window.getComputedStyle(postElement);
+      if (computedStyle.position === 'static') {
+        postElement.style.position = 'relative';
+      }
+      
+      // アイコンを追加
+      postElement.appendChild(iconContainer);
     }
-    
-    // アイコンを追加
-    postElement.appendChild(iconContainer);
     
     console.log(`Notion icon added to post ${index}`);
     
@@ -1038,6 +1211,11 @@ function addNotionIconToPost(postElement, index = 0) {
 
 // 投稿が有効かチェック
 function isValidPost(postElement) {
+  // data-idがある場合は有効とみなす（libecity.comの投稿要素）
+  if (postElement.getAttribute('data-id')) {
+    return true;
+  }
+  
   // 投稿テキストまたは画像が含まれているかチェック
   const hasText = postElement.querySelector(SELECTORS.postText);
   const hasImages = postElement.querySelector(SELECTORS.postImages);
@@ -1155,12 +1333,20 @@ async function extractElementContent(element) {
     // 投稿URLの取得
     try {
       const postUrl = await extractPostUrl(element);
-      if (postUrl && postUrl !== window.location.href) {
+      if (postUrl) {
         content.url = postUrl;
-        console.log('Extracted post URL:', postUrl);
+        console.log('Post URL extraction result:', {
+          extractedUrl: postUrl,
+          isUnique: postUrl !== window.location.href,
+          currentPageUrl: window.location.href
+        });
+      } else {
+        content.url = window.location.href;
+        console.log('No specific post URL found, using current page URL:', content.url);
       }
     } catch (error) {
       console.error('Failed to extract post URL:', error);
+      content.url = window.location.href;
     }
 
     // テキストコンテンツの抽出（改行を保持）
@@ -1198,13 +1384,18 @@ async function extractElementContent(element) {
       content.text = (tempDiv.textContent || tempDiv.innerText || '').trim();
     }
 
-    // 投稿者情報の抽出
-    const authorElement = element.querySelector(SELECTORS.userInfo) || 
+    // 投稿者情報の抽出（libecity.com専用セレクタを追加）
+    const authorElement = element.querySelector('a.username') ||
+                         element.querySelector('.username') ||
+                         element.querySelector(SELECTORS.userInfo) || 
                          element.querySelector('.user_name') || 
                          element.querySelector('[class*="user"]') ||
                          element.querySelector('[class*="author"]');
     if (authorElement) {
       content.author = authorElement.textContent.trim();
+      console.log('Extracted author:', content.author);
+    } else {
+      console.log('No author element found');
     }
 
     // チャットルーム名の抽出（Notionのタイトルプロパティ用）
@@ -1495,15 +1686,11 @@ async function handleNotionSave(postElement, iconElement) {
     iconElement.style.background = '#ffc107';
     iconElement.style.color = 'white';
     iconElement.innerHTML = `
-      <div class="notion-icon-tooltip">保存中...</div>
-      <div style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid white; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+      <div style="width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid white; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+      <span>保存中...</span>
     `;
     
-    // ツールチップを強制表示
-    const tooltip = iconElement.querySelector('.notion-icon-tooltip');
-    if (tooltip) {
-      tooltip.style.display = 'block';
-    }
+
     
     // コンテンツを抽出
     const content = await extractElementContent(postElement);
@@ -1557,30 +1744,23 @@ async function handleNotionSave(postElement, iconElement) {
       iconElement.style.background = '#28a745';
       iconElement.style.color = 'white';
       iconElement.innerHTML = `
-        <div class="notion-icon-tooltip">保存完了!</div>
-        <svg viewBox="0 0 24 24" width="16" height="16">
+        <svg viewBox="0 0 24 24" width="14" height="14">
           <path fill="white" d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
         </svg>
+        <span>保存完了!</span>
       `;
       
-      // 成功時のツールチップを一時的に表示
-      const successTooltip = iconElement.querySelector('.notion-icon-tooltip');
-      if (successTooltip) {
-        successTooltip.style.display = 'block';
-        setTimeout(() => {
-          successTooltip.style.display = 'none';
-        }, 2000);
-      }
+
       
       // 3秒後に元のアイコンに戻す
       setTimeout(() => {
         iconElement.style.background = 'rgba(255, 255, 255, 0.9)';
         iconElement.style.color = '#666';
         iconElement.innerHTML = `
-          <div class="notion-icon-tooltip">Notionに保存</div>
-          <svg viewBox="0 0 24 24" width="18" height="18">
+          <svg viewBox="0 0 24 24" width="14" height="14">
             <path fill="currentColor" d="M4,6H2V20A2,2 0 0,0 4,22H18V20H4V6M20,2H8A2,2 0 0,0 6,4V16A2,2 0 0,0 8,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H8V4H20V16M16,6H18V8H16V6M16,9H18V11H16V9M16,12H18V14H16V12M11,9H15V11H11V9M11,12H15V14H11V12M11,6H15V8H11V6Z"/>
           </svg>
+          <span>Notionに保存</span>
         `;
       }, 3000);
       
@@ -1597,30 +1777,23 @@ async function handleNotionSave(postElement, iconElement) {
     iconElement.style.background = '#dc3545';
     iconElement.style.color = 'white';
     iconElement.innerHTML = `
-      <div class="notion-icon-tooltip">保存エラー: ${error.message}</div>
-      <svg viewBox="0 0 24 24" width="16" height="16">
+      <svg viewBox="0 0 24 24" width="14" height="14">
         <path fill="white" d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
       </svg>
+      <span>保存エラー</span>
     `;
     
-    // エラー時のツールチップを一時的に表示
-    const errorTooltip = iconElement.querySelector('.notion-icon-tooltip');
-    if (errorTooltip) {
-      errorTooltip.style.display = 'block';
-      setTimeout(() => {
-        errorTooltip.style.display = 'none';
-      }, 4000);
-    }
+
     
     // 5秒後に元のアイコンに戻す
     setTimeout(() => {
       iconElement.style.background = 'rgba(255, 255, 255, 0.9)';
       iconElement.style.color = '#666';
       iconElement.innerHTML = `
-        <div class="notion-icon-tooltip">Notionに保存</div>
-        <svg viewBox="0 0 24 24" width="18" height="18">
+        <svg viewBox="0 0 24 24" width="14" height="14">
           <path fill="currentColor" d="M4,6H2V20A2,2 0 0,0 4,22H18V20H4V6M20,2H8A2,2 0 0,0 6,4V16A2,2 0 0,0 8,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H8V4H20V16M16,6H18V8H16V6M16,9H18V11H16V9M16,12H18V14H16V12M11,9H15V11H11V9M11,12H15V14H11V12M11,6H15V8H11V6Z"/>
         </svg>
+        <span>Notionに保存</span>
       `;
     }, 5000);
   }
@@ -1657,16 +1830,31 @@ function showImageFailureCallout(imageFailures) {
     border: 1px solid rgba(255, 255, 255, 0.2);
   `;
   
-  // メッセージ内容を作成
-  const failureCount = imageFailures.length;
-  const message = `⚠️ 投稿は保存されましたが、${failureCount}個の画像が保存できませんでした`;
+  // メッセージ内容を作成（新しい構造に対応）
+  let message, subMessage;
+  
+  if (imageFailures.detected && imageFailures.failed) {
+    // 新しい構造の場合
+    if (imageFailures.successful > 0) {
+      message = `⚠️ 投稿は保存されましたが、${imageFailures.detected}個中${imageFailures.failed}個の画像が保存できませんでした`;
+      subMessage = `${imageFailures.successful}個の画像は正常に保存されました。テキストと他の要素も正常に保存されています。`;
+    } else {
+      message = `⚠️ 投稿は保存されましたが、${imageFailures.detected}個の画像が保存できませんでした`;
+      subMessage = 'テキストと他の要素は正常に保存されています';
+    }
+  } else {
+    // 古い構造の場合（後方互換性）
+    const failureCount = Array.isArray(imageFailures) ? imageFailures.length : (imageFailures.failed || 1);
+    message = `⚠️ 投稿は保存されましたが、${failureCount}個の画像が保存できませんでした`;
+    subMessage = 'テキストと他の要素は正常に保存されています';
+  }
   
   callout.innerHTML = `
     <div style="display: flex; align-items: center; justify-content: space-between; gap: 15px;">
       <div>
         <div style="font-weight: 600;">${message}</div>
         <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">
-          テキストと他の要素は正常に保存されています
+          ${subMessage}
         </div>
       </div>
       <button id="notion-callout-close" style="
@@ -1716,7 +1904,7 @@ function showImageFailureCallout(imageFailures) {
   }, 8000);
   
   // デバッグ情報をコンソールに出力
-  console.log('Image failures:', imageFailures);
+  console.log('Image failure statistics:', imageFailures);
 }
 
 // CSSスタイルを追加
@@ -1727,31 +1915,7 @@ function addNotionIconStyles() {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
     
-    .notion-icon-tooltip {
-      position: absolute;
-      bottom: 40px;
-      right: 0;
-      background: rgba(0, 0, 0, 0.9);
-      color: white;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      white-space: nowrap;
-      display: none;
-      z-index: 10000;
-      pointer-events: none;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-      transition: opacity 0.2s ease;
-    }
-    
-    .notion-icon-tooltip::after {
-      content: '';
-      position: absolute;
-      top: 100%;
-      right: 12px;
-      border: 4px solid transparent;
-      border-top-color: rgba(0, 0, 0, 0.8);
-    }
+
     
     @keyframes spin {
       0% { transform: rotate(0deg); }
@@ -1799,4 +1963,87 @@ function addNotionIconStyles() {
 initialize();
 
 // スタイルを追加
-addNotionIconStyles(); 
+addNotionIconStyles();
+
+// デバッグ用関数（開発者コンソールで使用可能）
+window.debugNotionIcons = function() {
+  console.log('=== Notion Icons Debug ===');
+  
+  const articles = document.querySelectorAll('article[data-id]');
+  const logDetails = document.querySelectorAll('.log_detail');
+  const existingIcons = document.querySelectorAll('.notion-save-icon');
+  
+  console.log(`Found ${articles.length} article[data-id] elements`);
+  console.log(`Found ${logDetails.length} .log_detail elements`);
+  console.log(`Found ${existingIcons.length} existing notion icons`);
+  
+  articles.forEach((article, index) => {
+    const dataId = article.getAttribute('data-id');
+    const hasIcon = article.querySelector('.notion-save-icon');
+    console.log(`Article ${index}: data-id=${dataId}, hasIcon=${!!hasIcon}`);
+  });
+  
+  logDetails.forEach((detail, index) => {
+    const hasIcon = detail.querySelector('.notion-save-icon');
+    const parentArticle = detail.closest('article[data-id]');
+    console.log(`LogDetail ${index}: hasIcon=${!!hasIcon}, parentArticle=${!!parentArticle}`);
+  });
+  
+  console.log('========================');
+  
+  return {
+    articles: articles.length,
+    logDetails: logDetails.length,
+    existingIcons: existingIcons.length
+  };
+};
+
+window.debugExtractPostUrl = async function(postElement) {
+  if (!postElement) {
+    console.log('Usage: debugExtractPostUrl(postElement)');
+    console.log('Example: debugExtractPostUrl(document.querySelector("article[data-id]"))');
+    console.log('Example: debugExtractPostUrl(document.querySelector(".log_detail"))');
+    
+    // 利用可能な投稿要素を表示
+    const posts = document.querySelectorAll('article[data-id], .post, .message, [data-id]');
+    console.log(`Found ${posts.length} potential post elements:`, posts);
+    return;
+  }
+  
+  console.log('=== Post URL Extraction Debug ===');
+  console.log('Post element:', postElement);
+  console.log('Current page URL:', window.location.href);
+  
+  // データ属性の詳細確認
+  const dataId = postElement.getAttribute('data-id');
+  const dataPostId = postElement.getAttribute('data-post-id');
+  const dataMessageId = postElement.getAttribute('data-message-id');
+  const id = postElement.getAttribute('id');
+  
+  console.log('Data attributes:');
+  console.log('- data-id:', dataId);
+  console.log('- data-post-id:', dataPostId);
+  console.log('- data-message-id:', dataMessageId);
+  console.log('- id:', id);
+  
+  // 親要素の確認
+  let parentElement = postElement.parentElement;
+  for (let i = 0; i < 3 && parentElement; i++) {
+    const parentDataId = parentElement.getAttribute('data-id');
+    if (parentDataId) {
+      console.log(`Parent ${i + 1} data-id:`, parentDataId);
+    }
+    parentElement = parentElement.parentElement;
+  }
+  
+  try {
+    const url = await extractPostUrl(postElement);
+    console.log('Extracted URL:', url);
+    console.log('Is unique URL:', url !== window.location.href);
+    console.log('================================');
+    return url;
+  } catch (error) {
+    console.error('Error extracting URL:', error);
+    return null;
+  }
+}; 
