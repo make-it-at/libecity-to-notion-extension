@@ -31,12 +31,14 @@
       <!-- データベース選択 -->
       <div class="input-group">
         <label for="databaseSelect">保存先データベース:</label>
-        <select id="databaseSelect" class="database-select">
-          <option value="">データベースを選択...</option>
-        </select>
-        <button id="refreshDatabases" class="refresh-btn" title="データベース一覧を更新">
-          <span class="refresh-icon">🔄</span>
-        </button>
+        <div class="database-select-container">
+          <select id="databaseSelect" class="database-select">
+            <option value="">データベースを選択してください...</option>
+          </select>
+          <button id="refreshDatabases" class="refresh-btn" title="データベース一覧を更新" aria-label="データベース一覧を更新">
+            <span class="refresh-icon">🔄</span>
+          </button>
+        </div>
       </div>
       
       <!-- 新しいデータベース作成 -->
@@ -49,24 +51,30 @@
 
       <!-- コンテンツ選択モード -->
       <div class="content-selection">
-        <button id="selectContentBtn" class="secondary-btn">
+        <button id="selectContentBtn" class="secondary-btn" aria-describedby="selection-help">
           <span class="icon">🎯</span>
-          コンテンツを選択
+          コンテンツを選択して保存
         </button>
         <div id="selectedContent" class="selected-content" style="display: none;">
           <div class="selected-preview">
             <span class="preview-text"></span>
-            <button class="clear-selection" title="選択をクリア">×</button>
+            <button class="clear-selection" title="選択をクリア" aria-label="選択をクリア">×</button>
           </div>
+        </div>
+        <div id="selection-help" class="help-text">
+          ページ上のコンテンツをクリックして選択できます
         </div>
       </div>
 
       <!-- 保存ボタン -->
-      <button id="saveToNotion" class="save-btn" disabled>
+      <button id="saveToNotion" class="save-btn" disabled aria-describedby="save-help">
         <span class="icon">💾</span>
         <span class="btn-text">Notionに保存</span>
         <div class="spinner" style="display: none;"></div>
       </button>
+      <div id="save-help" class="help-text">
+        データベースを選択してから保存してください
+      </div>
     </div>
 
     <!-- プログレス表示 -->

@@ -165,7 +165,7 @@ function updatePageStatus() {
   if (!isLibeCity) {
     elements.selectContentBtn.disabled = true;
     elements.saveToNotion.disabled = true;
-    showError('このページはLibeCityではありません。libecity.comでご利用ください。');
+    showError('📍 libecity.comのページでご利用ください。現在のページでは機能を使用できません。');
   }
 }
 
@@ -189,7 +189,7 @@ async function checkConnectionStatus() {
     } else {
       elements.connectionStatus.textContent = '未接続';
       elements.connectionStatus.className = 'status-value disconnected';
-      showError('Notion APIに接続できません。設定を確認してください。');
+      showError('🔗 Notion APIに接続できません。設定画面でAPIキーを確認してください。');
     }
   } catch (error) {
     console.error('Connection check failed:', error);
@@ -250,6 +250,7 @@ function updateDatabaseSelect() {
 // データベース変更の処理
 async function handleDatabaseChange() {
   const selectedValue = elements.databaseSelect.value;
+  const saveHelpText = document.getElementById('save-help');
   
   if (selectedValue === 'create_default') {
     await createDefaultDatabase();
@@ -259,8 +260,21 @@ async function handleDatabaseChange() {
   // 選択されたデータベースを保存
   if (selectedValue) {
     await chrome.storage.sync.set({ selectedDatabase: selectedValue });
-    updateSaveButtonState();
+    
+    // ヘルプテキストを更新
+    if (saveHelpText) {
+      saveHelpText.textContent = 'ページのコンテンツを保存できます';
+      saveHelpText.style.color = '#28a745';
+    }
+  } else {
+    // ヘルプテキストを元に戻す
+    if (saveHelpText) {
+      saveHelpText.textContent = 'データベースを選択してから保存してください';
+      saveHelpText.style.color = '#6c757d';
+    }
   }
+  
+  updateSaveButtonState();
 }
 
 // デフォルトデータベースの作成
@@ -390,8 +404,15 @@ async function startSelectionMode() {
     
     if (response && response.success) {
       isSelectionMode = true;
-      elements.selectContentBtn.textContent = '選択を終了';
+      elements.selectContentBtn.innerHTML = '<span class="icon">⏹️</span>選択を終了';
       elements.selectContentBtn.classList.add('active');
+      
+      // ヘルプテキストを更新
+      const selectionHelp = document.getElementById('selection-help');
+      if (selectionHelp) {
+        selectionHelp.textContent = 'ページ上の要素をクリックして選択してください';
+        selectionHelp.style.color = '#667eea';
+      }
     } else {
       throw new Error('選択モードの開始に失敗しました');
     }
@@ -409,8 +430,15 @@ async function stopSelectionMode() {
     });
     
     isSelectionMode = false;
-    elements.selectContentBtn.textContent = 'コンテンツを選択';
+    elements.selectContentBtn.innerHTML = '<span class="icon">🎯</span>コンテンツを選択して保存';
     elements.selectContentBtn.classList.remove('active');
+    
+    // ヘルプテキストを元に戻す
+    const selectionHelp = document.getElementById('selection-help');
+    if (selectionHelp) {
+      selectionHelp.textContent = 'ページ上のコンテンツをクリックして選択できます';
+      selectionHelp.style.color = '#6c757d';
+    }
   } catch (error) {
     console.error('Failed to stop selection mode:', error);
   }
