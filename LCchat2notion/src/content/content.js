@@ -5,9 +5,9 @@ console.log('LibeCity to Notion Content Script loaded');
 
 // libecity.com専用のセレクタ定義
 const SELECTORS = {
-  // 投稿関連（article[data-id]を最優先に）
-  postContainer: 'article[data-id]',
-  postText: '.post_text',
+  // 投稿関連（article[data-id]を最優先に、つぶやき投稿も含む）
+  postContainer: 'article[data-id], .originalTweetArea, .tweetArea, [class*="tweet"], .post_container',
+  postText: '.post_text, .post_text > div, .tweet_text, .originalTweetArea .post_text, .editbox .post_text, .tweetArea .post_text',
   postTime: '.post_time, .time, time',
   postAuthor: 'a.username, .username, .user_name, .author',
   postAvatar: '.user_proficon img, .avatar img',
@@ -1008,23 +1008,42 @@ function setupChatPostMonitoring() {
       if (mutation.type === 'childList') {
         mutation.addedNodes.forEach((node) => {
           if (node.nodeType === Node.ELEMENT_NODE) {
-            // 新しい投稿が追加された場合（article[data-id]を優先）
-            let newPosts = node.querySelectorAll ? node.querySelectorAll('article[data-id]') : [];
+            // 新しい投稿が追加された場合（複数のセレクタを確認）
+            let newPosts = [];
             
-            // article[data-id]が見つからない場合は.log_detailも確認
-            if (newPosts.length === 0) {
-              newPosts = node.querySelectorAll ? node.querySelectorAll('.log_detail') : [];
+            // 複数のセレクタで投稿を検索
+            const postSelectors = [
+              'article[data-id]',
+              '.log_detail',
+              '.originalTweetArea',
+              '.tweetArea',
+              '[class*="tweet"]'
+            ];
+            
+            for (const selector of postSelectors) {
+              if (node.querySelectorAll) {
+                const posts = node.querySelectorAll(selector);
+                if (posts.length > 0) {
+                  newPosts = Array.from(posts);
+                  console.log(`New posts detected with selector ${selector}: ${posts.length}`);
+                  break;
+                }
+              }
             }
             
             if (newPosts.length > 0) {
-              console.log(`New posts detected: ${newPosts.length}`);
               setTimeout(() => addNotionIconsToPosts(), 500); // 少し遅延させて確実に追加
             }
             
             // 追加されたノード自体が投稿の場合
-            if (node.matches && (node.matches('article[data-id]') || node.matches('.log_detail'))) {
-              console.log('New post element detected');
-              setTimeout(() => addNotionIconsToPosts(), 500); // 全体を再処理
+            if (node.matches) {
+              for (const selector of postSelectors) {
+                if (node.matches(selector)) {
+                  console.log(`New post element detected with selector: ${selector}`);
+                  setTimeout(() => addNotionIconsToPosts(), 500); // 全体を再処理
+                  break;
+                }
+              }
             }
           }
         });
@@ -1048,15 +1067,28 @@ function addNotionIconsToPosts() {
     existingIcons.forEach(icon => icon.remove());
     console.log(`Removed ${existingIcons.length} existing icons`);
     
-    // article[data-id]を優先して取得
-    let posts = document.querySelectorAll('article[data-id]');
+    // 複数のセレクタで投稿を検索
+    let posts = [];
+    const postSelectors = [
+      'article[data-id]',
+      '.log_detail',
+      '.originalTweetArea',
+      '.tweetArea',
+      '[class*="tweet"]'
+    ];
     
-    // article[data-id]が見つからない場合は.log_detailを使用
+    for (const selector of postSelectors) {
+      const foundPosts = document.querySelectorAll(selector);
+      if (foundPosts.length > 0) {
+        posts = Array.from(foundPosts);
+        console.log(`Using ${selector} selector, found ${posts.length} posts`);
+        break;
+      }
+    }
+    
     if (posts.length === 0) {
-      posts = document.querySelectorAll('.log_detail');
-      console.log('Using .log_detail selector as fallback');
-    } else {
-      console.log('Using article[data-id] selector');
+      console.log('No posts found with any selector');
+      return;
     }
     
     console.log(`Found ${posts.length} posts to add Notion icons`);
@@ -1350,7 +1382,38 @@ async function extractElementContent(element) {
     }
 
     // テキストコンテンツの抽出（改行を保持）
-    const textElements = element.querySelectorAll(SELECTORS.postText);
+    let textElements = element.querySelectorAll(SELECTORS.postText);
+    
+    // つぶやき投稿の場合の特別処理
+    if (textElements.length === 0) {
+      // つぶやき投稿の可能性がある場合の追加セレクタ
+      const tweetSelectors = [
+        '.originalTweetArea',
+        '.tweetArea',
+        '.editbox',
+        '.tweet_content',
+        '.post_content',
+        '[class*="tweet"]',
+        '[class*="post_text"]'
+      ];
+      
+      for (const selector of tweetSelectors) {
+        const tweetElements = element.querySelectorAll(selector);
+        if (tweetElements.length > 0) {
+          // つぶやき要素内からテキストを探す
+          for (const tweetEl of tweetElements) {
+            const innerTextElements = tweetEl.querySelectorAll('.post_text, .tweet_text, div');
+            if (innerTextElements.length > 0) {
+              textElements = innerTextElements;
+              console.log(`Found tweet text with selector: ${selector}`);
+              break;
+            }
+          }
+          if (textElements.length > 0) break;
+        }
+      }
+    }
+    
     if (textElements.length > 0) {
       content.text = Array.from(textElements)
         .map(el => {
@@ -1370,9 +1433,36 @@ async function extractElementContent(element) {
         .map(text => text.trim())
         .filter(text => text.length > 0)
         .join('\n\n');
+        
+      console.log('Extracted text from specific elements:', content.text.substring(0, 100) + '...');
     } else {
       // フォールバック: 投稿全体のテキスト（改行保持）
-      let html = element.innerHTML;
+      console.log('Using fallback text extraction from entire element...');
+      
+      // 不要な要素を除外してテキストを抽出
+      const clonedElement = element.cloneNode(true);
+      
+      // 除外する要素（ボタン、アイコン、メタデータなど）
+      const excludeSelectors = [
+        '.notion-icon',
+        'button',
+        '.btn',
+        '.icon',
+        '.avatar',
+        '.timestamp',
+        '.meta',
+        'script',
+        'style',
+        '.editbox ul', // つぶやきのアクションボタン
+        '.action_area'
+      ];
+      
+      excludeSelectors.forEach(selector => {
+        const elementsToRemove = clonedElement.querySelectorAll(selector);
+        elementsToRemove.forEach(el => el.remove());
+      });
+      
+      let html = clonedElement.innerHTML;
       html = html.replace(/<br\s*\/?>/gi, '\n');
       html = html.replace(/<\/p>/gi, '\n');
       html = html.replace(/<p[^>]*>/gi, '');
@@ -1382,6 +1472,7 @@ async function extractElementContent(element) {
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = html;
       content.text = (tempDiv.textContent || tempDiv.innerText || '').trim();
+      console.log('Extracted fallback text:', content.text.substring(0, 100) + '...');
     }
 
     // 投稿者情報の抽出（libecity.com専用セレクタを追加）
