@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "LibeCity to Notion",
+  "version": "1.0.0",
+  "description": "libecity.comのコンテンツをNotionに自動転記するChrome拡張機能",
+  
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "identity"
+  ],
+  
+  "host_permissions": [
+    "https://libecity.com/*",
+    "https://api.notion.com/*"
+  ],
+  
+  "background": {
+    "service_worker": "src/background/background.js"
+  },
+  
+  "content_scripts": [
+    {
+      "matches": ["https://libecity.com/*"],
+      "js": ["src/content/content.js"],
+      "css": ["src/content/content.css"],
+      "run_at": "document_end"
+    }
+  ],
+  
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "32": "assets/icons/icon32.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
+  
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "LibeCity to Notion",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "32": "assets/icons/icon32.png",
+      "48": "assets/icons/icon48.png",
+      "128": "assets/icons/icon128.png"
+    }
+  },
+  
+  "options_page": "src/options/options.html",
+  
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/images/*"],
+      "matches": ["https://libecity.com/*"]
+    }
+  ]
+} 
