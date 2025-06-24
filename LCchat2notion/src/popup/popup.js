@@ -6,9 +6,6 @@ const elements = {
   pageStatus: document.getElementById('pageStatus'),
   databaseSelect: document.getElementById('databaseSelect'),
   refreshDatabases: document.getElementById('refreshDatabases'),
-  selectContentBtn: document.getElementById('selectContentBtn'),
-  selectedContent: document.getElementById('selectedContent'),
-  saveToNotion: document.getElementById('saveToNotion'),
   progressSection: document.getElementById('progressSection'),
   progressFill: document.getElementById('progressFill'),
   progressText: document.getElementById('progressText'),
@@ -17,17 +14,26 @@ const elements = {
   errorMessage: document.getElementById('errorMessage'),
   notionLink: document.getElementById('notionLink'),
   retryBtn: document.getElementById('retryBtn'),
-  historyList: document.getElementById('historyList'),
-  clearHistory: document.getElementById('clearHistory'),
-  settingsBtn: document.getElementById('settingsBtn'),
-  helpBtn: document.getElementById('helpBtn')
+  helpBtn: document.getElementById('helpBtn'),
+  // タブ関連
+  statusTab: document.getElementById('statusTab'),
+  settingsTab: document.getElementById('settingsTab'),
+  statusContent: document.getElementById('statusContent'),
+  settingsContent: document.getElementById('settingsContent'),
+  // 設定関連
+  apiKey: document.getElementById('apiKey'),
+  toggleApiKey: document.getElementById('toggleApiKey'),
+  testConnection: document.getElementById('testConnection'),
+  connectionResult: document.getElementById('connectionResult'),
+  saveImages: document.getElementById('saveImages'),
+  saveLinks: document.getElementById('saveLinks'),
+  notifications: document.getElementById('notifications'),
+  saveSettings: document.getElementById('saveSettings')
 };
 
 // 状態管理
 let currentTab = null;
-let selectedElement = null;
 let databases = [];
-let isSelectionMode = false;
 
 // 初期化
 document.addEventListener('DOMContentLoaded', async () => {
@@ -90,42 +96,27 @@ async function showDebugInfo() {
 
 // イベントリスナーの設定
 function setupEventListeners() {
+  // タブ関連
+  elements.statusTab.addEventListener('click', () => switchTab('status'));
+  elements.settingsTab.addEventListener('click', () => switchTab('settings'));
+  
   // データベース関連
   elements.databaseSelect.addEventListener('change', handleDatabaseChange);
   elements.refreshDatabases.addEventListener('click', handleRefreshDatabases);
   
-  // 新しいデータベース作成ボタン
-  const createDatabaseBtn = document.getElementById('createDatabaseBtn');
-  if (createDatabaseBtn) {
-    createDatabaseBtn.addEventListener('click', handleCreateDatabase);
-  }
-  
-  // コンテンツ選択
-  elements.selectContentBtn.addEventListener('click', handleSelectContent);
-  
-  // 保存ボタン
-  elements.saveToNotion.addEventListener('click', handleSaveToNotion);
+  // 設定関連
+  elements.toggleApiKey.addEventListener('click', handleToggleApiKey);
+  elements.testConnection.addEventListener('click', handleTestConnection);
+  elements.saveSettings.addEventListener('click', handleSaveSettings);
+  elements.apiKey.addEventListener('input', handleApiKeyChange);
   
   // 再試行ボタン
   elements.retryBtn.addEventListener('click', handleRetry);
   
-  // 履歴関連
-  elements.clearHistory.addEventListener('click', handleClearHistory);
-  
   // フッターボタン
-  elements.settingsBtn.addEventListener('click', () => {
-    chrome.runtime.openOptionsPage();
-  });
-  
   elements.helpBtn.addEventListener('click', () => {
     chrome.tabs.create({ url: 'https://github.com/kmakita1201/libecity-to-notion-extension' });
   });
-  
-  // 選択クリアボタン
-  const clearSelectionBtn = document.querySelector('.clear-selection');
-  if (clearSelectionBtn) {
-    clearSelectionBtn.addEventListener('click', clearSelection);
-  }
   
   // メッセージリスナー
   chrome.runtime.onMessage.addListener(handleMessage);
@@ -134,11 +125,11 @@ function setupEventListeners() {
 // 初期データの読み込み
 async function loadInitialData() {
   try {
+    // 設定の読み込み
+    await loadSettings();
+    
     // データベース一覧の取得
     await loadDatabases();
-    
-    // 履歴の読み込み
-    await loadHistory();
     
     // 保存されたデータベース選択の復元
     const settings = await chrome.storage.sync.get(['selectedDatabase']);
@@ -161,10 +152,8 @@ function updatePageStatus() {
   elements.pageStatus.textContent = isLibeCity ? 'LibeCity' : 'その他';
   elements.pageStatus.className = `status-value ${isLibeCity ? 'libecity' : 'other'}`;
   
-  // LibeCityページでない場合は機能を制限
+  // LibeCityページでない場合は警告を表示
   if (!isLibeCity) {
-    elements.selectContentBtn.disabled = true;
-    elements.saveToNotion.disabled = true;
     showError('📍 libecity.comのページでご利用ください。現在のページでは機能を使用できません。');
   }
 }
@@ -232,85 +221,29 @@ function updateDatabaseSelect() {
     elements.databaseSelect.removeChild(elements.databaseSelect.lastChild);
   }
   
+  if (databases.length === 0) {
+    elements.databaseSelect.innerHTML = '<option value="">データベースが見つかりません</option>';
+    return;
+  }
+  
   // データベースオプションを追加
   databases.forEach(db => {
     const option = document.createElement('option');
     option.value = db.id;
-    option.textContent = db.title || 'Untitled Database';
+    option.textContent = db.title;
     elements.databaseSelect.appendChild(option);
   });
-  
-  // デフォルトデータベース作成オプション
-  const createOption = document.createElement('option');
-  createOption.value = 'create_default';
-  createOption.textContent = '+ デフォルトデータベースを作成';
-  elements.databaseSelect.appendChild(createOption);
 }
 
-// データベース変更の処理
+// データベース選択の処理
 async function handleDatabaseChange() {
-  const selectedValue = elements.databaseSelect.value;
-  const saveHelpText = document.getElementById('save-help');
-  
-  if (selectedValue === 'create_default') {
-    await createDefaultDatabase();
-    return;
-  }
+  const selectedDatabase = elements.databaseSelect.value;
   
   // 選択されたデータベースを保存
-  if (selectedValue) {
-    await chrome.storage.sync.set({ selectedDatabase: selectedValue });
-    
-    // ヘルプテキストを更新
-    if (saveHelpText) {
-      saveHelpText.textContent = 'ページのコンテンツを保存できます';
-      saveHelpText.style.color = '#28a745';
-    }
-  } else {
-    // ヘルプテキストを元に戻す
-    if (saveHelpText) {
-      saveHelpText.textContent = 'データベースを選択してから保存してください';
-      saveHelpText.style.color = '#6c757d';
-    }
-  }
-  
-  updateSaveButtonState();
-}
-
-// デフォルトデータベースの作成
-async function createDefaultDatabase() {
   try {
-    showProgress('デフォルトデータベースを作成中...', 30);
-    
-    const response = await chrome.runtime.sendMessage({ 
-      action: 'createDefaultDatabase',
-      pageTitle: currentTab.title
-    });
-    
-    if (response && response.success) {
-      showProgress('データベース作成完了', 100);
-      
-      // データベース一覧を更新
-      await loadDatabases();
-      
-      // 新しく作成されたデータベースを選択
-      elements.databaseSelect.value = response.databaseId;
-      await chrome.storage.sync.set({ selectedDatabase: response.databaseId });
-      
-      updateSaveButtonState();
-      hideProgress();
-      
-      showSuccess('デフォルトデータベースが作成されました');
-    } else {
-      throw new Error(response?.error || 'データベースの作成に失敗しました');
-    }
+    await chrome.storage.sync.set({ selectedDatabase });
   } catch (error) {
-    console.error('Failed to create default database:', error);
-    hideProgress();
-    showError('データベースの作成に失敗しました: ' + error.message);
-    
-    // 選択をリセット
-    elements.databaseSelect.value = '';
+    console.error('Failed to save database selection:', error);
   }
 }
 
@@ -319,359 +252,31 @@ async function handleRefreshDatabases() {
   await loadDatabases();
 }
 
-// 新しいデータベース作成の処理
-async function handleCreateDatabase() {
-  try {
-    const createBtn = document.getElementById('createDatabaseBtn');
-    showLoading(createBtn);
-    
-    showProgress('新しいデータベースを作成中...', 30);
-    
-    const response = await chrome.runtime.sendMessage({ 
-      action: 'createDefaultDatabase',
-      pageTitle: currentTab?.title || 'LibeCity Chat Archive'
-    });
-    
-    if (response && response.success) {
-      showProgress('データベース作成完了', 100);
-      
-      // データベース一覧を更新
-      await loadDatabases();
-      
-      // 新しく作成されたデータベースを選択
-      elements.databaseSelect.value = response.databaseId;
-      await chrome.storage.sync.set({ selectedDatabase: response.databaseId });
-      
-      updateSaveButtonState();
-      hideProgress();
-      
-      showSuccess('新しいデータベースが作成されました！プロパティ設定の問題が解決されました。');
-    } else {
-      throw new Error(response?.error || 'データベースの作成に失敗しました');
-    }
-  } catch (error) {
-    console.error('Failed to create database:', error);
-    hideProgress();
-    showError('データベースの作成に失敗しました: ' + error.message);
-  } finally {
-    const createBtn = document.getElementById('createDatabaseBtn');
-    hideLoading(createBtn);
-  }
-}
-
-// コンテンツ選択の処理
-async function handleSelectContent() {
-  if (isSelectionMode) {
-    // 選択モードを終了
-    await stopSelectionMode();
-  } else {
-    // 選択モードを開始
-    await startSelectionMode();
-  }
-}
-
-// 選択モードの開始
-async function startSelectionMode() {
-  try {
-    // まずcontent scriptが注入されているかチェック
-    let response;
-    try {
-      response = await chrome.tabs.sendMessage(currentTab.id, { 
-        action: 'ping' 
-      });
-    } catch (pingError) {
-      console.log('Content script not found, injecting...');
-      
-      // content scriptを手動で注入
-      await chrome.scripting.executeScript({
-        target: { tabId: currentTab.id },
-        files: ['src/content/content.js']
-      });
-      
-      // CSSも注入
-      await chrome.scripting.insertCSS({
-        target: { tabId: currentTab.id },
-        files: ['src/content/content.css']
-      });
-      
-      // 少し待ってから再試行
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    
-    response = await chrome.tabs.sendMessage(currentTab.id, { 
-      action: 'startSelection' 
-    });
-    
-    if (response && response.success) {
-      isSelectionMode = true;
-      elements.selectContentBtn.innerHTML = '<span class="icon">⏹️</span>選択を終了';
-      elements.selectContentBtn.classList.add('active');
-      
-      // ヘルプテキストを更新
-      const selectionHelp = document.getElementById('selection-help');
-      if (selectionHelp) {
-        selectionHelp.textContent = 'ページ上の要素をクリックして選択してください';
-        selectionHelp.style.color = '#667eea';
-      }
-    } else {
-      throw new Error('選択モードの開始に失敗しました');
-    }
-  } catch (error) {
-    console.error('Failed to start selection mode:', error);
-    showError('選択モードの開始に失敗しました: ' + error.message);
-  }
-}
-
-// 選択モードの終了
-async function stopSelectionMode() {
-  try {
-    await chrome.tabs.sendMessage(currentTab.id, { 
-      action: 'stopSelection' 
-    });
-    
-    isSelectionMode = false;
-    elements.selectContentBtn.innerHTML = '<span class="icon">🎯</span>コンテンツを選択して保存';
-    elements.selectContentBtn.classList.remove('active');
-    
-    // ヘルプテキストを元に戻す
-    const selectionHelp = document.getElementById('selection-help');
-    if (selectionHelp) {
-      selectionHelp.textContent = 'ページ上のコンテンツをクリックして選択できます';
-      selectionHelp.style.color = '#6c757d';
-    }
-  } catch (error) {
-    console.error('Failed to stop selection mode:', error);
-  }
-}
-
-// 選択のクリア
-function clearSelection() {
-  selectedElement = null;
-  elements.selectedContent.style.display = 'none';
-  updateSaveButtonState();
-}
-
-// Notionへの保存処理
-async function handleSaveToNotion() {
-  const databaseId = elements.databaseSelect.value;
-  
-  if (!databaseId) {
-    showError('データベースを選択してください');
-    return;
-  }
-  
-  try {
-    // 保存ボタンをローディング状態に
-    elements.saveToNotion.classList.add('loading');
-    elements.saveToNotion.disabled = true;
-    
-    showProgress('コンテンツを抽出中...', 20);
-    
-    // コンテンツの抽出
-    let extractResponse;
-    try {
-      extractResponse = await chrome.tabs.sendMessage(currentTab.id, {
-        action: 'extractContent',
-        elementSelector: selectedElement?.selector
-      });
-    } catch (extractError) {
-      console.log('Content script not found during extraction, injecting...');
-      
-      // content scriptを手動で注入
-      await chrome.scripting.executeScript({
-        target: { tabId: currentTab.id },
-        files: ['src/content/content.js']
-      });
-      
-      // CSSも注入
-      await chrome.scripting.insertCSS({
-        target: { tabId: currentTab.id },
-        files: ['src/content/content.css']
-      });
-      
-      // 少し待ってから再試行
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      extractResponse = await chrome.tabs.sendMessage(currentTab.id, {
-        action: 'extractContent',
-        elementSelector: selectedElement?.selector
-      });
-    }
-    
-    if (!extractResponse || !extractResponse.success) {
-      throw new Error(extractResponse?.error || 'コンテンツの抽出に失敗しました');
-    }
-    
-    showProgress('Notionに保存中...', 60);
-    
-    // Notionに保存
-    let saveResponse;
-    try {
-      saveResponse = await chrome.runtime.sendMessage({
-        action: 'saveToNotion',
-        databaseId: databaseId,
-        content: extractResponse.content
-      });
-    } catch (saveError) {
-      console.error('Background script communication failed:', saveError);
-      throw new Error('Background scriptとの通信に失敗しました。拡張機能を再読み込みしてください。');
-    }
-    
-    if (!saveResponse || !saveResponse.success) {
-      throw new Error(saveResponse?.error || 'Notionへの保存に失敗しました');
-    }
-    
-    showProgress('保存完了', 100);
-    
-    // 成功通知を表示
-    showSaveSuccess(saveResponse.pageUrl);
-    
-    // 履歴に追加
-    await addToHistory({
-      title: extractResponse.content.title || currentTab.title,
-      url: currentTab.url,
-      notionUrl: saveResponse.pageUrl,
-      timestamp: Date.now(),
-      blocks: extractResponse.content.blocks || 0
-    });
-    
-    // 履歴を更新
-    await loadHistory();
-    
-  } catch (error) {
-    console.error('Save to Notion failed:', error);
-    showError('保存に失敗しました: ' + error.message);
-  } finally {
-    // ローディング状態を解除
-    elements.saveToNotion.classList.remove('loading');
-    elements.saveToNotion.disabled = false;
-    hideProgress();
-  }
-}
-
-// 再試行処理
+// 再試行ボタンの処理
 async function handleRetry() {
   hideError();
-  await handleSaveToNotion();
-}
-
-// 履歴のクリア
-async function handleClearHistory() {
-  if (confirm('履歴をすべてクリアしますか？')) {
-    await chrome.storage.local.remove('saveHistory');
-    await loadHistory();
-  }
-}
-
-// 履歴の読み込み
-async function loadHistory() {
-  try {
-    const result = await chrome.storage.local.get('saveHistory');
-    const history = result.saveHistory || [];
-    
-    updateHistoryDisplay(history);
-  } catch (error) {
-    console.error('Failed to load history:', error);
-  }
-}
-
-// 履歴表示の更新
-function updateHistoryDisplay(history) {
-  if (history.length === 0) {
-    elements.historyList.innerHTML = '<div class="no-history">履歴がありません</div>';
-    return;
-  }
-  
-  const historyHtml = history
-    .slice(-5) // 最新5件のみ表示
-    .reverse() // 新しい順に表示
-    .map(item => `
-      <div class="history-item" data-url="${item.notionUrl}">
-        <div class="history-title">${escapeHtml(item.title)}</div>
-        <div class="history-meta">
-          <span>${formatDate(item.timestamp)}</span>
-          <span>→ Notion</span>
-        </div>
-      </div>
-    `).join('');
-  
-  elements.historyList.innerHTML = historyHtml;
-  
-  // 履歴項目のクリックイベント
-  elements.historyList.querySelectorAll('.history-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const url = item.dataset.url;
-      if (url) {
-        chrome.tabs.create({ url });
-      }
-    });
-  });
-}
-
-// 履歴に項目を追加
-function addToHistory(item) {
-  const historyList = document.getElementById('historyList');
-  
-  const historyItem = document.createElement('div');
-  historyItem.className = 'history-item';
-  
-  const title = item.title.length > 30 ? item.title.substring(0, 30) + '...' : item.title;
-  const blocksInfo = item.blocks ? ` (${item.blocks}ブロック)` : '';
-  
-  historyItem.innerHTML = `
-    <div class="history-title">${title}${blocksInfo}</div>
-    <div class="history-meta">
-      <span class="history-time">${item.timestamp}</span>
-      ${item.pageUrl ? `<a href="${item.pageUrl}" target="_blank" class="history-link">Notionで開く</a>` : ''}
-    </div>
-  `;
-  
-  // 最新の項目を先頭に追加
-  if (historyList.firstChild) {
-    historyList.insertBefore(historyItem, historyList.firstChild);
-  } else {
-    historyList.appendChild(historyItem);
-  }
-  
-  // 履歴が5個を超えたら古いものを削除
-  while (historyList.children.length > 5) {
-    historyList.removeChild(historyList.lastChild);
-  }
-  
-  // ローカルストレージに保存
-  saveHistoryToStorage();
+  await checkConnectionStatus();
+  await loadDatabases();
 }
 
 // メッセージハンドラー
 function handleMessage(message, sender, sendResponse) {
   console.log('Popup received message:', message);
   
-  switch (message.action) {
-    case 'elementSelected':
-      selectedElement = message.element;
-      showSelectedElement(message.element);
-      updateSaveButtonState();
-      break;
-      
-    case 'selectionCancelled':
-      stopSelectionMode();
-      break;
+  if (message.action === 'elementSelected') {
+    // 不要になった機能
+  } else if (message.action === 'saveProgress') {
+    showProgress(message.text, message.percent);
+  } else if (message.action === 'saveComplete') {
+    hideProgress();
+    if (message.success) {
+      showSaveSuccess(message.notionUrl);
+    } else {
+      showError('保存に失敗しました: ' + message.error);
+    }
   }
-}
-
-// 選択された要素の表示
-function showSelectedElement(element) {
-  const previewText = `${element.tagName}: ${element.textContent}`;
-  elements.selectedContent.querySelector('.preview-text').textContent = previewText;
-  elements.selectedContent.style.display = 'block';
-}
-
-// 保存ボタンの状態更新
-function updateSaveButtonState() {
-  const hasDatabase = elements.databaseSelect.value && elements.databaseSelect.value !== 'create_default';
-  const isLibeCity = currentTab && currentTab.url && currentTab.url.includes('libecity.com');
   
-  elements.saveToNotion.disabled = !hasDatabase || !isLibeCity;
+  sendResponse({ received: true });
 }
 
 // プログレス表示
@@ -686,34 +291,29 @@ function hideProgress() {
   elements.progressSection.style.display = 'none';
 }
 
-// 成功通知の表示
+// 保存成功の表示
 function showSaveSuccess(notionUrl) {
   elements.successNotification.style.display = 'block';
-  elements.errorNotification.style.display = 'none';
-  
-  if (notionUrl) {
+  if (notionUrl && elements.notionLink) {
     elements.notionLink.href = notionUrl;
-    elements.notionLink.style.display = 'inline-flex';
-  } else {
-    elements.notionLink.style.display = 'none';
+    elements.notionLink.style.display = 'inline-block';
   }
   
-  // 3秒後に自動で隠す
+  // 3秒後に自動で非表示
   setTimeout(() => {
     elements.successNotification.style.display = 'none';
   }, 3000);
 }
 
-// 成功通知（一般）
+// 成功メッセージの表示
 function showSuccess(message) {
-  // 簡単な成功通知を表示
   console.log('Success:', message);
+  // 必要に応じて成功通知UI
 }
 
 // エラー表示
 function showError(message) {
   elements.errorNotification.style.display = 'block';
-  elements.successNotification.style.display = 'none';
   elements.errorMessage.textContent = message;
 }
 
@@ -724,151 +324,182 @@ function hideError() {
 
 // ローディング表示
 function showLoading(button) {
-  if (button.classList.contains('refresh-btn')) {
-    button.classList.add('spinning');
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = '<div class="spinner"></div>';
   }
 }
 
 // ローディング非表示
 function hideLoading(button) {
-  if (button.classList.contains('refresh-btn')) {
-    button.classList.remove('spinning');
+  if (button) {
+    button.disabled = false;
+    button.innerHTML = '🔄';
   }
 }
 
-// ユーティリティ関数
+// HTMLエスケープ
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 }
 
+// 日付フォーマット
 function formatDate(timestamp) {
   const date = new Date(timestamp);
   const now = new Date();
-  const diffMs = now - date;
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
+  const diff = now - date;
   
-  if (diffMins < 1) return 'たった今';
-  if (diffMins < 60) return `${diffMins}分前`;
-  if (diffHours < 24) return `${diffHours}時間前`;
-  if (diffDays < 7) return `${diffDays}日前`;
+  // 1時間以内
+  if (diff < 60 * 60 * 1000) {
+    const minutes = Math.floor(diff / (60 * 1000));
+    return `${minutes}分前`;
+  }
   
+  // 1日以内
+  if (diff < 24 * 60 * 60 * 1000) {
+    const hours = Math.floor(diff / (60 * 60 * 1000));
+    return `${hours}時間前`;
+  }
+  
+  // それ以上
   return date.toLocaleDateString('ja-JP', {
     month: 'short',
-    day: 'numeric'
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
   });
 }
 
-async function saveToNotionDatabase(databaseId) {
-  const saveButton = document.getElementById('saveBtn');
-  const progressContainer = document.getElementById('progressContainer');
-  const progressBar = document.getElementById('progressBar');
-  const progressText = document.getElementById('progressText');
-  const successMessage = document.getElementById('successMessage');
+// タブ切り替え
+function switchTab(tabName) {
+  // タブボタンの状態更新
+  elements.statusTab.classList.toggle('active', tabName === 'status');
+  elements.settingsTab.classList.toggle('active', tabName === 'settings');
+  
+  // タブコンテンツの表示切り替え
+  elements.statusContent.classList.toggle('active', tabName === 'status');
+  elements.settingsContent.classList.toggle('active', tabName === 'settings');
+}
+
+// 設定の読み込み
+async function loadSettings() {
+  try {
+    const result = await chrome.storage.sync.get(['apiKey', 'saveImages', 'saveLinks', 'notifications']);
+    
+    if (result.apiKey) {
+      elements.apiKey.value = result.apiKey;
+    }
+    
+    elements.saveImages.checked = result.saveImages !== false;
+    elements.saveLinks.checked = result.saveLinks !== false;
+    elements.notifications.checked = result.notifications !== false;
+    
+    console.log('Settings loaded');
+  } catch (error) {
+    console.error('Failed to load settings:', error);
+  }
+}
+
+// APIキー表示切り替え
+function handleToggleApiKey() {
+  if (elements.apiKey.type === 'password') {
+    elements.apiKey.type = 'text';
+    elements.toggleApiKey.textContent = '🙈';
+    elements.toggleApiKey.title = 'APIキーを非表示';
+  } else {
+    elements.apiKey.type = 'password';
+    elements.toggleApiKey.textContent = '👁️';
+    elements.toggleApiKey.title = 'APIキーを表示';
+  }
+}
+
+// APIキー変更時の処理
+function handleApiKeyChange() {
+  // 接続結果をクリア
+  elements.connectionResult.textContent = '';
+  elements.connectionResult.className = 'connection-result';
+}
+
+// 接続テスト
+async function handleTestConnection() {
+  const apiKey = elements.apiKey.value.trim();
+  
+  if (!apiKey) {
+    showConnectionResult('APIキーを入力してください', 'error');
+    return;
+  }
   
   try {
-    // UIの更新
-    saveButton.disabled = true;
-    saveButton.textContent = 'コンテンツを抽出中...';
-    progressContainer.style.display = 'block';
-    progressBar.style.width = '10%';
-    progressText.textContent = 'コンテンツを抽出しています...';
+    elements.testConnection.disabled = true;
+    elements.testConnection.textContent = 'テスト中...';
+    showConnectionResult('接続を確認中...', '');
     
-    // アクティブタブの取得
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    // コンテンツの抽出
-    const extractResult = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(tab.id, { action: 'extractContent' }, resolve);
+    // 一時的にAPIキーを保存してテスト
+    const response = await chrome.runtime.sendMessage({
+      action: 'testConnection',
+      apiKey: apiKey
     });
     
-    if (!extractResult.success) {
-      throw new Error(extractResult.error || 'コンテンツの抽出に失敗しました');
-    }
-    
-    // 進捗更新
-    progressBar.style.width = '30%';
-    progressText.textContent = 'Notionに保存中...';
-    saveButton.textContent = 'Notionに保存中...';
-    
-    // Notionに保存
-    const saveResult = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({
-        action: 'saveToNotion',
-        databaseId: databaseId,
-        content: extractResult.content
-      }, resolve);
-    });
-    
-    if (saveResult.success) {
-      // 成功時の処理
-      progressBar.style.width = '100%';
-      progressText.textContent = '保存完了！';
-      
-      // 詳細な結果表示
-      let resultMessage = '✅ 保存が完了しました！';
-      if (saveResult.totalBlocks) {
-        resultMessage += `\n📝 ${saveResult.totalBlocks}個のブロックを保存`;
-      }
-      
-      successMessage.innerHTML = resultMessage.replace(/\n/g, '<br>');
-      successMessage.style.display = 'block';
-      
-      // 履歴に追加
-      addToHistory({
-        title: extractResult.content.title || 'Untitled',
-        url: extractResult.content.url || tab.url,
-        timestamp: new Date().toLocaleString(),
-        pageUrl: saveResult.pageUrl,
-        blocks: saveResult.totalBlocks || 0
-      });
-      
-      // ボタンを復元
-      setTimeout(() => {
-        saveButton.disabled = false;
-        saveButton.textContent = '保存';
-        progressContainer.style.display = 'none';
-        successMessage.style.display = 'none';
-      }, 3000);
-      
+    if (response && response.success) {
+      showConnectionResult('✅ 接続成功', 'success');
     } else {
-      throw new Error(saveResult.error || '保存に失敗しました');
+      showConnectionResult('❌ 接続失敗: ' + (response?.error || '不明なエラー'), 'error');
+    }
+  } catch (error) {
+    console.error('Connection test failed:', error);
+    showConnectionResult('❌ 接続テストに失敗しました', 'error');
+  } finally {
+    elements.testConnection.disabled = false;
+    elements.testConnection.textContent = '接続テスト';
+  }
+}
+
+// 接続結果の表示
+function showConnectionResult(message, type) {
+  elements.connectionResult.textContent = message;
+  elements.connectionResult.className = `connection-result ${type}`;
+}
+
+// 設定保存
+async function handleSaveSettings() {
+  try {
+    elements.saveSettings.disabled = true;
+    elements.saveSettings.textContent = '保存中...';
+    
+    const settings = {
+      apiKey: elements.apiKey.value.trim(),
+      saveImages: elements.saveImages.checked,
+      saveLinks: elements.saveLinks.checked,
+      notifications: elements.notifications.checked
+    };
+    
+    // 設定を保存
+    await chrome.storage.sync.set(settings);
+    
+    // 接続状態を更新
+    await checkConnectionStatus();
+    
+    // データベース一覧を更新
+    if (settings.apiKey) {
+      await loadDatabases();
     }
     
-  } catch (error) {
-    console.error('Save error:', error);
-    
-    // エラー表示
-    progressText.textContent = 'エラーが発生しました';
-    progressBar.style.backgroundColor = '#ff4444';
-    
-    const errorMessage = document.createElement('div');
-    errorMessage.className = 'error-message';
-    errorMessage.textContent = `❌ ${error.message}`;
-    errorMessage.style.cssText = `
-      color: #ff4444;
-      font-size: 12px;
-      margin-top: 10px;
-      padding: 8px;
-      background: #fff2f2;
-      border-radius: 4px;
-      border: 1px solid #ffcccc;
-    `;
-    
-    document.querySelector('.popup-main').appendChild(errorMessage);
-    
-    // エラー表示を3秒後に削除
+    // 成功メッセージ
+    elements.saveSettings.textContent = '✅ 保存完了';
     setTimeout(() => {
-      errorMessage.remove();
-      progressContainer.style.display = 'none';
-      progressBar.style.backgroundColor = '#4CAF50';
-    }, 3000);
+      elements.saveSettings.textContent = '設定を保存';
+    }, 2000);
     
-    // ボタンを復元
-    saveButton.disabled = false;
-    saveButton.textContent = '保存';
+    console.log('Settings saved successfully');
+  } catch (error) {
+    console.error('Failed to save settings:', error);
+    elements.saveSettings.textContent = '❌ 保存失敗';
+    setTimeout(() => {
+      elements.saveSettings.textContent = '設定を保存';
+    }, 2000);
+  } finally {
+    elements.saveSettings.disabled = false;
   }
 } 

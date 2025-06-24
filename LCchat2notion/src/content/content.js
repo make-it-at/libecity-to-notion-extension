@@ -1548,6 +1548,11 @@ async function handleNotionSave(postElement, iconElement) {
     }
     
     if (response && response.success) {
+      // 画像保存失敗がある場合はコールアウト表示
+      if (response.imageFailures && response.imageFailures.length > 0) {
+        showImageFailureCallout(response.imageFailures);
+      }
+      
       // 成功時のアイコン表示
       iconElement.style.background = '#28a745';
       iconElement.style.color = 'white';
@@ -1621,6 +1626,99 @@ async function handleNotionSave(postElement, iconElement) {
   }
 }
 
+// 画像保存失敗時のコールアウト表示
+function showImageFailureCallout(imageFailures) {
+  // 既存のコールアウトがあれば削除
+  const existingCallout = document.getElementById('notion-image-failure-callout');
+  if (existingCallout) {
+    existingCallout.remove();
+  }
+  
+  // コールアウト要素を作成
+  const callout = document.createElement('div');
+  callout.id = 'notion-image-failure-callout';
+  callout.style.cssText = `
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #ff6b6b, #feca57);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    z-index: 10000;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    max-width: 90%;
+    text-align: center;
+    animation: slideInFromTop 0.3s ease-out;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  `;
+  
+  // メッセージ内容を作成
+  const failureCount = imageFailures.length;
+  const message = `⚠️ 投稿は保存されましたが、${failureCount}個の画像が保存できませんでした`;
+  
+  callout.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 15px;">
+      <div>
+        <div style="font-weight: 600;">${message}</div>
+        <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">
+          テキストと他の要素は正常に保存されています
+        </div>
+      </div>
+      <button id="notion-callout-close" style="
+        background: rgba(255, 255, 255, 0.2);
+        border: none;
+        color: white;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        transition: background 0.2s ease;
+      " onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'" 
+         onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'">×</button>
+    </div>
+  `;
+  
+  // ページに追加
+  document.body.appendChild(callout);
+  
+  // 閉じるボタンのイベントリスナー
+  const closeButton = document.getElementById('notion-callout-close');
+  if (closeButton) {
+    closeButton.addEventListener('click', () => {
+      callout.style.animation = 'slideOutToTop 0.3s ease-in forwards';
+      setTimeout(() => {
+        if (callout.parentNode) {
+          callout.remove();
+        }
+      }, 300);
+    });
+  }
+  
+  // 8秒後に自動で消す
+  setTimeout(() => {
+    if (callout.parentNode) {
+      callout.style.animation = 'slideOutToTop 0.3s ease-in forwards';
+      setTimeout(() => {
+        if (callout.parentNode) {
+          callout.remove();
+        }
+      }, 300);
+    }
+  }, 8000);
+  
+  // デバッグ情報をコンソールに出力
+  console.log('Image failures:', imageFailures);
+}
+
 // CSSスタイルを追加
 function addNotionIconStyles() {
   const style = document.createElement('style');
@@ -1658,6 +1756,28 @@ function addNotionIconStyles() {
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
+    }
+    
+    @keyframes slideInFromTop {
+      from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+    }
+    
+    @keyframes slideOutToTop {
+      from {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      to {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-20px);
+      }
     }
     
     .notion-save-icon:hover .notion-icon-tooltip {

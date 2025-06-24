@@ -137,7 +137,7 @@ async function handleMessage(request, sender) {
         return { status: 'active', timestamp: Date.now() };
         
       case 'testConnection':
-        return await testNotionConnection();
+        return await testNotionConnection(request.apiKey);
         
       case 'getDatabases':
         return await getDatabases();
@@ -181,18 +181,28 @@ async function handleMessage(request, sender) {
 }
 
 // Notion API接続テスト
-async function testNotionConnection() {
+async function testNotionConnection(testApiKey = null) {
   try {
     const settings = await getSettings();
+    const apiKey = testApiKey || settings.apiKey;
     
-    if (!settings.apiKey) {
+    if (!apiKey) {
       return { success: false, error: 'APIキーが設定されていません' };
     }
     
-    const response = await makeNotionRequest('/users/me', 'GET');
+    // 一時的にAPIキーを使用してテスト
+    const response = await fetch(`${NOTION_API.BASE_URL}/users/me`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Notion-Version': NOTION_API.VERSION,
+        'Content-Type': 'application/json'
+      }
+    });
     
     if (response.ok) {
-      return { success: true, user: await response.json() };
+      const user = await response.json();
+      return { success: true, user: user };
     } else {
       const error = await response.json();
       return { success: false, error: error.message || 'API接続に失敗しました' };
@@ -332,6 +342,8 @@ async function createParentPage(title) {
 
 // Notionへの保存
 async function saveToNotion(databaseId, content) {
+  let imageFailures = []; // 画像保存失敗を記録
+  
   try {
     console.log('=== saveToNotion started ===');
     
@@ -640,6 +652,11 @@ async function saveToNotion(databaseId, content) {
               });
             } else {
               console.warn('Invalid image URL skipped:', block.src);
+              imageFailures.push({
+                url: block.src,
+                alt: block.alt || '画像',
+                reason: '無効なURL形式'
+              });
             }
             break;
             
@@ -826,9 +843,23 @@ async function saveToNotion(databaseId, content) {
         
         // 有効な画像のみを処理
         const validImages = images.filter(image => {
-          if (!image.src) return false;
+          if (!image.src) {
+            imageFailures.push({
+              url: image.src || 'URLなし',
+              alt: image.alt || '画像',
+              reason: 'URLが空です'
+            });
+            return false;
+          }
           const isValid = isValidNotionImageUrl(image.src);
           console.log(`Image validation: ${image.src.substring(0, 50)}... -> ${isValid}`);
+          if (!isValid) {
+            imageFailures.push({
+              url: image.src,
+              alt: image.alt || '画像',
+              reason: '無効なURL形式'
+            });
+          }
           return isValid;
         });
         
@@ -941,6 +972,10 @@ async function saveToNotion(databaseId, content) {
         
         if (addBlocksResult.success) {
           console.log(`Successfully added ${addBlocksResult.blocksAdded} additional blocks`);
+          // 追加ブロックでの画像エラーも統合
+          if (addBlocksResult.imageErrors && addBlocksResult.imageErrors.length > 0) {
+            imageFailures.push(...addBlocksResult.imageErrors);
+          }
         } else {
           console.warn('Failed to add some additional blocks:', addBlocksResult.error);
         }
@@ -956,7 +991,8 @@ async function saveToNotion(databaseId, content) {
         success: true,
         pageId: page.id,
         pageUrl: page.url,
-        totalBlocks: children.length
+        totalBlocks: children.length,
+        imageFailures: imageFailures.length > 0 ? imageFailures : null
       };
     } else {
       const error = await response.json();
@@ -1381,6 +1417,7 @@ async function addBlocksToPage(pageId, blocks) {
     const maxBlocksPerRequest = 100;
     let totalAdded = 0;
     let batchNumber = 2; // 最初のバッチは1なので2から開始
+    let imageErrors = [];
     
     // ブロックを分割して順次追加
     for (let i = 0; i < blocks.length; i += maxBlocksPerRequest) {
@@ -1403,10 +1440,35 @@ async function addBlocksToPage(pageId, blocks) {
           const error = await response.json();
           console.error(`Failed to add batch ${batchNumber}:`, error);
           
-          // エラーが発生しても他のバッチは続行
+          // 画像エラーの場合は画像以外のブロックを再試行
           if (error.message && error.message.includes('Invalid image url')) {
-            console.log('Skipping batch due to invalid image URLs');
-            continue;
+            console.log('Retrying batch without image blocks due to invalid image URLs');
+            
+            // 画像ブロック以外を抽出
+            const nonImageBlocks = batch.filter(block => {
+              if (block.type === 'image') {
+                imageErrors.push({
+                  url: block.image?.external?.url || 'Unknown URL',
+                  reason: 'Notion API rejected URL'
+                });
+                return false;
+              }
+              return true;
+            });
+            
+            if (nonImageBlocks.length > 0) {
+              // 画像以外のブロックで再試行
+              const retryResponse = await makeNotionRequest(`/blocks/${pageId}/children`, 'PATCH', {
+                children: nonImageBlocks
+              });
+              
+              if (retryResponse.ok) {
+                totalAdded += nonImageBlocks.length;
+                console.log(`Batch ${batchNumber} retry successful: ${nonImageBlocks.length} blocks (${batch.length - nonImageBlocks.length} images skipped)`);
+              } else {
+                console.error(`Batch ${batchNumber} retry also failed`);
+              }
+            }
           } else {
             // 他のエラーの場合は中断
             break;
@@ -1429,7 +1491,8 @@ async function addBlocksToPage(pageId, blocks) {
     return {
       success: true,
       blocksAdded: totalAdded,
-      totalBatches: batchNumber - 2
+      totalBatches: batchNumber - 2,
+      imageErrors: imageErrors.length > 0 ? imageErrors : null
     };
     
   } catch (error) {
@@ -1437,7 +1500,8 @@ async function addBlocksToPage(pageId, blocks) {
     return {
       success: false,
       error: error.message,
-      blocksAdded: 0
+      blocksAdded: 0,
+      imageErrors: []
     };
   }
 }
