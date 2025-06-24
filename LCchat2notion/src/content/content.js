@@ -180,7 +180,118 @@ async function extractSpecificContent(selector) {
   return await extractElementContent(element);
 }
 
-// 削除：重複した関数定義を削除
+// 投稿URLの取得
+async function extractPostUrl(postElement) {
+  try {
+    // 方法1: データ属性から投稿IDを取得
+    const postId = postElement.getAttribute('data-id') || 
+                   postElement.getAttribute('data-post-id') ||
+                   postElement.getAttribute('id');
+    
+    if (postId) {
+      return `https://libecity.com/post/${postId}`;
+    }
+    
+    // 方法2: 投稿内のリンクボタンを探す（複数のセレクタを試行）
+    const linkButtonSelectors = [
+      '.btn_gray svg[data-icon="link"]',
+      '.btn svg[data-icon="link"]', 
+      'svg[data-icon="link"]',
+      '.fa-link',
+      '[class*="link"]'
+    ];
+    
+    let linkButton = null;
+    for (const selector of linkButtonSelectors) {
+      const element = postElement.querySelector(selector);
+      if (element) {
+        linkButton = element.closest('li') || element.closest('button') || element.closest('[class*="btn"]');
+        if (linkButton) {
+          console.log('Found link button with selector:', selector);
+          break;
+        }
+      }
+    }
+    
+    if (linkButton) {
+      // リンクボタンのクリックをシミュレートしてURLを取得
+      const urlFromButton = await getUrlFromLinkButton(linkButton, postElement);
+      if (urlFromButton && urlFromButton !== window.location.href) {
+        return urlFromButton;
+      }
+    }
+    
+    // 方法3: 投稿内の時刻リンクを探す
+    const timeLink = postElement.querySelector('.post_time a, .time a, a[href*="/post/"]');
+    if (timeLink) {
+      const href = timeLink.getAttribute('href');
+      if (href) {
+        return href.startsWith('http') ? href : `https://libecity.com${href}`;
+      }
+    }
+    
+    // 方法4: 投稿の構造から推測
+    const postContainer = postElement.closest('[data-id], [id]');
+    if (postContainer) {
+      const id = postContainer.getAttribute('data-id') || postContainer.getAttribute('id');
+      if (id && id.match(/^\d+$/)) {
+        return `https://libecity.com/post/${id}`;
+      }
+    }
+    
+    // 方法5: 現在のページURLを使用（最後の手段）
+    return window.location.href;
+    
+  } catch (error) {
+    console.error('Failed to extract post URL:', error);
+    return window.location.href;
+  }
+}
+
+// リンクボタンからURLを取得
+function getUrlFromLinkButton(linkButton, postElement) {
+  return new Promise((resolve) => {
+    try {
+      // クリップボードの監視を開始
+      let originalClipboard = '';
+      
+      // 現在のクリップボード内容を保存
+      navigator.clipboard.readText().then(text => {
+        originalClipboard = text;
+      }).catch(() => {
+        // クリップボード読み取りに失敗した場合は空文字列
+        originalClipboard = '';
+      });
+      
+      // リンクボタンをクリック
+      const clickEvent = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        view: window
+      });
+      
+      linkButton.dispatchEvent(clickEvent);
+      
+      // 少し待ってからクリップボードを確認
+      setTimeout(() => {
+        navigator.clipboard.readText().then(clipboardText => {
+          if (clipboardText && clipboardText !== originalClipboard && clipboardText.includes('libecity.com')) {
+            resolve(clipboardText);
+          } else {
+            // フォールバック: 現在のページURL
+            resolve(window.location.href);
+          }
+        }).catch(() => {
+          resolve(window.location.href);
+        });
+      }, 500);
+      
+    } catch (error) {
+      console.error('Failed to get URL from link button:', error);
+      resolve(window.location.href);
+    }
+  });
+}
 
 // ページ全体からのコンテンツ自動抽出
 async function extractPageContent() {
@@ -1040,6 +1151,17 @@ async function extractElementContent(element) {
         id: element.id
       }
     };
+
+    // 投稿URLの取得
+    try {
+      const postUrl = await extractPostUrl(element);
+      if (postUrl && postUrl !== window.location.href) {
+        content.url = postUrl;
+        console.log('Extracted post URL:', postUrl);
+      }
+    } catch (error) {
+      console.error('Failed to extract post URL:', error);
+    }
 
     // テキストコンテンツの抽出（改行を保持）
     const textElements = element.querySelectorAll(SELECTORS.postText);

@@ -363,6 +363,12 @@ async function saveToNotion(databaseId, content) {
     const author = content.metadata?.author || content.author?.name || content.author || 'Unknown';
     const url = content.url || '';
     
+    console.log('Extracted URL for Notion:', {
+      contentUrl: content.url,
+      finalUrl: url,
+      isPostSpecific: url !== window.location.href && url !== ''
+    });
+    
     console.log('Step 4: Processing date with timezone consideration...');
     // 日時の処理を改善（時刻を含む、タイムゾーン考慮）
     let date = null;
