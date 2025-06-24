@@ -131,38 +131,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // メッセージ処理のメイン関数
 async function handleMessage(request, sender) {
-  switch (request.action) {
-    case 'ping':
-      return { status: 'active', timestamp: Date.now() };
-      
-    case 'testConnection':
-      return await testNotionConnection();
-      
-    case 'getDatabases':
-      return await getDatabases();
-      
-    case 'createDefaultDatabase':
-      return await createDefaultDatabase(request.pageTitle);
-      
-    case 'saveToNotion':
-      return await saveToNotion(request.databaseId, request.content);
-      
-    case 'getStats':
-      return await getStats();
-      
-    case 'elementSelected':
-      // Content scriptからの要素選択通知を処理
-      console.log('Element selected:', request.element);
-      return { success: true };
-      
-    case 'openNotionAuth':
-      return await openNotionAuthPage();
-      
-    case 'createWorkspace':
-      return await createNotionWorkspace(request.workspaceName);
-      
-    default:
-      throw new Error(`Unknown action: ${request.action}`);
+  try {
+    switch (request.action) {
+      case 'ping':
+        return { status: 'active', timestamp: Date.now() };
+        
+      case 'testConnection':
+        return await testNotionConnection();
+        
+      case 'getDatabases':
+        return await getDatabases();
+        
+      case 'createDefaultDatabase':
+        return await createDefaultDatabase(request.pageTitle);
+        
+      case 'saveToNotion':
+        console.log('=== saveToNotion request received ===');
+        console.log('Database ID:', request.databaseId);
+        console.log('Content summary:', {
+          hasText: !!request.content?.text,
+          hasUrl: !!request.content?.url,
+          url: request.content?.url,
+          textLength: request.content?.text?.length || 0
+        });
+        return await saveToNotion(request.databaseId, request.content);
+        
+      case 'getStats':
+        return await getStats();
+        
+      case 'elementSelected':
+        // Content scriptからの要素選択通知を処理
+        console.log('Element selected:', request.element);
+        return { success: true };
+        
+      case 'openNotionAuth':
+        return await openNotionAuthPage();
+        
+      case 'createWorkspace':
+        return await createNotionWorkspace(request.workspaceName);
+        
+      default:
+        throw new Error(`Unknown action: ${request.action}`);
+    }
+  } catch (error) {
+    console.error('Error in handleMessage:', error);
+    console.error('Error stack:', error.stack);
+    return { success: false, error: error.message };
   }
 }
 
@@ -321,6 +335,16 @@ async function saveToNotion(databaseId, content) {
   try {
     console.log('=== saveToNotion started ===');
     
+    // 入力パラメータの検証
+    if (!databaseId) {
+      throw new Error('Database ID is required');
+    }
+    if (!content) {
+      throw new Error('Content is required');
+    }
+    
+    console.log('Input validation passed');
+    
     // デバッグ用に簡略化したログを出力（巨大なJSONを避ける）
     console.log('Saving content to Notion. Content summary:', {
       hasText: !!content.text,
@@ -361,12 +385,12 @@ async function saveToNotion(databaseId, content) {
     
     console.log('Step 3: Processing author and metadata...');
     const author = content.metadata?.author || content.author?.name || content.author || 'Unknown';
-    const url = content.url || '';
+    const url = content.url || 'https://libecity.com';
     
     console.log('Extracted URL for Notion:', {
       contentUrl: content.url,
       finalUrl: url,
-      isPostSpecific: url !== window.location.href && url !== ''
+      isPostSpecific: url && url !== '' && url.includes('libecity.com')
     });
     
     console.log('Step 4: Processing date with timezone consideration...');
@@ -481,7 +505,7 @@ async function saveToNotion(databaseId, content) {
           ]
         },
         URL: {
-          url: url || null
+          url: url || 'https://libecity.com'
         },
         Author: {
           rich_text: [
