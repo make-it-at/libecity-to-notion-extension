@@ -1724,8 +1724,7 @@ async function saveToNotion(databaseId, content) {
       };
     } else {
       const error = await response.json();
-      // エラーログを簡素化（機能は正常でもエラー表示を避ける）
-      console.error('保存処理でエラーが発生しました');
+      // エラー統計のみ更新（ログ出力なし）
       await updateStats({ errors: 1 });
       
       // ユーザーフレンドリーなエラーメッセージを提供
@@ -1824,7 +1823,7 @@ async function saveToNotion(databaseId, content) {
                }
              }
            } catch (retryError) {
-             console.error('画像なしでの再試行も失敗しました');
+             // 再試行失敗時もログ出力なし
            }
         }
         // その他のエラーの場合
@@ -1840,8 +1839,7 @@ async function saveToNotion(databaseId, content) {
       };
     }
   } catch (error) {
-    // エラーログを簡素化
-    console.error('保存処理中にエラーが発生しました');
+    // エラー統計のみ更新（ログ出力なし）
     await updateStats({ errors: 1 });
     return { 
       success: false, 
@@ -1889,8 +1887,8 @@ async function adjustPropertiesForDatabase(databaseId, pageData) {
       properties: adjustedProperties
     };
   } catch (error) {
-    console.error('プロパティ調整でエラーが発生しました');
-    return pageData; // エラーの場合は元のデータを返す
+    // エラー時は元のデータを返す（ログ出力なし）
+    return pageData;
   }
 }
 
@@ -1900,7 +1898,7 @@ async function getStats() {
     const result = await chrome.storage.local.get('stats');
     return { success: true, stats: result.stats || stats };
   } catch (error) {
-    console.error('統計情報の取得でエラーが発生しました');
+    // エラー時はデフォルト値を返す（ログ出力なし）
     return { success: false, error: '統計情報を取得できませんでした' };
   }
 }
@@ -1928,7 +1926,7 @@ async function updateStats(updates) {
     await chrome.storage.local.set({ stats: currentStats });
     stats = currentStats;
   } catch (error) {
-    console.error('統計情報の更新でエラーが発生しました');
+    // 統計更新失敗時もログ出力なし
   }
 }
 
@@ -1963,7 +1961,7 @@ async function getSettings() {
     const result = await chrome.storage.sync.get('settings');
     return result.settings || {};
   } catch (error) {
-    console.error('設定の取得でエラーが発生しました');
+    // 設定取得失敗時はデフォルト値を返す（ログ出力なし）
     return {};
   }
 }
@@ -2292,7 +2290,7 @@ async function logError(context, error, details = null) {
     details
   };
   
-  console.error('エラーが記録されました:', context);
+  // エラー記録（ログ出力なし）
   
   try {
     const result = await chrome.storage.local.get('errorLogs');
@@ -2307,7 +2305,7 @@ async function logError(context, error, details = null) {
     
     await chrome.storage.local.set({ errorLogs: logs });
   } catch (storageError) {
-    console.error('エラーログの保存に失敗しました');
+    // エラーログ保存失敗時もログ出力なし
   }
 }
 
@@ -2318,7 +2316,7 @@ async function openNotionAuthPage() {
     await chrome.tabs.create({ url: authUrl });
     return { success: true, message: 'Notion認証ページを開きました。Integration Tokenを作成してください。' };
   } catch (error) {
-    console.error('Notion認証ページのオープンに失敗しました');
+    // 認証ページオープン失敗時もログ出力なし
     return { success: false, error: '認証ページを開けませんでした' };
   }
 }
@@ -2424,7 +2422,7 @@ async function createNotionWorkspace(workspaceName) {
       return { success: false, error: error.message || 'ワークスペースの作成に失敗しました' };
     }
   } catch (error) {
-    console.error('ワークスペースの作成に失敗しました');
+    // ワークスペース作成失敗時もログ出力なし
     return { success: false, error: 'ワークスペースを作成できませんでした' };
   }
 }
