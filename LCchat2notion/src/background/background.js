@@ -1725,29 +1725,25 @@ async function saveToNotion(databaseId, content) {
     } else {
       const error = await response.json();
       // エラーログを簡素化（機能は正常でもエラー表示を避ける）
-      console.error('保存処理でエラーが発生しました:', response.status);
+      console.error('保存処理でエラーが発生しました');
       await updateStats({ errors: 1 });
       
-      // 詳細なエラー情報を提供
+      // ユーザーフレンドリーなエラーメッセージを提供
       let errorMessage = 'ページの作成に失敗しました';
       if (error.message) {
-        errorMessage = error.message;
-        
         // 文字数制限エラーの場合
         if (error.message.includes('should be ≤')) {
           errorMessage = 'テキストが長すぎます。文字数制限(2000文字)を超えています。';
         }
-        
         // プロパティエラーの場合
-        if (error.message.includes('body failed validation')) {
+        else if (error.message.includes('body failed validation')) {
           errorMessage = 'データベースのプロパティ設定に問題があります。新しいデータベースを作成してください。';
         }
-        
         // 画像URLエラーの場合（改善されたエラー処理）
-        if (error.message.includes('Invalid image url')) {
+        else if (error.message.includes('Invalid image url')) {
           errorMessage = '画像の保存に失敗しました。テキストと他の要素は保存されました。';
           
-                     // 画像なしで再試行
+          // 画像なしで再試行
            try {
              console.log('Retrying without image blocks...');
              const nonImagePageData = { ...adjustedPageData };
@@ -1831,6 +1827,10 @@ async function saveToNotion(databaseId, content) {
              console.error('画像なしでの再試行も失敗しました');
            }
         }
+        // その他のエラーの場合
+        else {
+          errorMessage = '保存中にエラーが発生しました。しばらく時間をおいて再試行してください。';
+        }
       }
       
       return { 
@@ -1889,7 +1889,7 @@ async function adjustPropertiesForDatabase(databaseId, pageData) {
       properties: adjustedProperties
     };
   } catch (error) {
-    console.error('Failed to adjust properties:', error);
+    console.error('プロパティ調整でエラーが発生しました');
     return pageData; // エラーの場合は元のデータを返す
   }
 }
@@ -1900,8 +1900,8 @@ async function getStats() {
     const result = await chrome.storage.local.get('stats');
     return { success: true, stats: result.stats || stats };
   } catch (error) {
-    console.error('Failed to get stats:', error);
-    return { success: false, error: error.message };
+    console.error('統計情報の取得でエラーが発生しました');
+    return { success: false, error: '統計情報を取得できませんでした' };
   }
 }
 
@@ -1928,7 +1928,7 @@ async function updateStats(updates) {
     await chrome.storage.local.set({ stats: currentStats });
     stats = currentStats;
   } catch (error) {
-    console.error('Failed to update stats:', error);
+    console.error('統計情報の更新でエラーが発生しました');
   }
 }
 
@@ -1963,7 +1963,7 @@ async function getSettings() {
     const result = await chrome.storage.sync.get('settings');
     return result.settings || {};
   } catch (error) {
-    console.error('Failed to get settings:', error);
+    console.error('設定の取得でエラーが発生しました');
     return {};
   }
 }
@@ -2292,7 +2292,7 @@ async function logError(context, error, details = null) {
     details
   };
   
-  console.error('Error logged:', errorLog);
+  console.error('エラーが記録されました:', context);
   
   try {
     const result = await chrome.storage.local.get('errorLogs');
@@ -2307,7 +2307,7 @@ async function logError(context, error, details = null) {
     
     await chrome.storage.local.set({ errorLogs: logs });
   } catch (storageError) {
-    console.error('Failed to store error log:', storageError);
+    console.error('エラーログの保存に失敗しました');
   }
 }
 
@@ -2318,8 +2318,8 @@ async function openNotionAuthPage() {
     await chrome.tabs.create({ url: authUrl });
     return { success: true, message: 'Notion認証ページを開きました。Integration Tokenを作成してください。' };
   } catch (error) {
-    console.error('Failed to open Notion auth page:', error);
-    return { success: false, error: error.message };
+    console.error('Notion認証ページのオープンに失敗しました');
+    return { success: false, error: '認証ページを開けませんでした' };
   }
 }
 
@@ -2424,8 +2424,8 @@ async function createNotionWorkspace(workspaceName) {
       return { success: false, error: error.message || 'ワークスペースの作成に失敗しました' };
     }
   } catch (error) {
-    console.error('Failed to create workspace:', error);
-    return { success: false, error: error.message };
+    console.error('ワークスペースの作成に失敗しました');
+    return { success: false, error: 'ワークスペースを作成できませんでした' };
   }
 }
 
