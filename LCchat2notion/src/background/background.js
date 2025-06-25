@@ -362,15 +362,30 @@ async function saveToNotion(databaseId, content) {
     console.log('Input validation passed');
     
     // デバッグ用に簡略化したログを出力（巨大なJSONを避ける）
-    console.log('Saving content to Notion. Content summary:', {
+    console.log('=== BACKGROUND: DETAILED CONTENT ANALYSIS ===');
+    console.log('Content summary:', {
       hasText: !!content.text,
       textLength: content.text?.length || 0,
+      textPreview: content.text ? content.text.substring(0, 100) + '...' : 'No text',
       hasImages: !!(content.images && content.images.length > 0),
       imageCount: content.images?.length || 0,
+      hasLinks: !!(content.links && content.links.length > 0),
+      linkCount: content.links?.length || 0,
+      hasStructuredContent: !!(content.structuredContent && content.structuredContent.length > 0),
+      structuredContentCount: content.structuredContent?.length || 0,
       hasAuthor: !!content.author,
       hasTimestamp: !!content.timestamp,
       hasUrl: !!content.url
     });
+    
+    if (content.structuredContent && content.structuredContent.length > 0) {
+      console.log('Structured content breakdown:');
+      const breakdown = content.structuredContent.reduce((acc, item) => {
+        acc[item.type] = (acc[item.type] || 0) + 1;
+        return acc;
+      }, {});
+      console.log(breakdown);
+    }
     
     console.log('Step 1: Processing title (chat room name)...');
     // タイトルはチャットルーム名を使用
@@ -546,14 +561,7 @@ async function saveToNotion(databaseId, content) {
           ]
         },
         Chat: {
-          rich_text: [
-            {
-              type: 'text',
-              text: {
-                content: text.length > 2000 ? text.substring(0, 2000) + '...' : text
-              }
-            }
-          ]
+          rich_text: createRichTextBlocks(text)
         },
         Date: {
           date: date ? {
@@ -589,19 +597,296 @@ async function saveToNotion(databaseId, content) {
     let totalImagesDetected = 0;
     let validImagesProcessed = 0;
     
+    // 長文処理の情報を追跡
+    let longTextProcessingInfo = null;
+    
     // 子要素（構造化されたブロック生成）
     const children = [];
     
     // 構造化コンテンツがある場合はそれを優先使用
     const structuredContent = content.structuredContent || content.content?.structuredContent || [];
     
+    console.log('=== BACKGROUND: STRUCTURED CONTENT DEBUG ===');
+    console.log('content.structuredContent:', content.structuredContent);
+    console.log('content.content?.structuredContent:', content.content?.structuredContent);
+    console.log('Final structuredContent:', structuredContent);
+    console.log('structuredContent.length:', structuredContent.length);
+    
     if (structuredContent.length > 0) {
-      console.log(`Step 6a: Processing ${structuredContent.length} structured content blocks`);
+      console.log(`=== BACKGROUND: PROCESSING STRUCTURED CONTENT ===`);
+      console.log(`Processing ${structuredContent.length} structured content blocks`);
       
-      // 連続するテキストとリンクを1つの段落に統合
-      let currentParagraph = [];
+      // 構造化コンテンツの詳細分析
+      const contentAnalysis = structuredContent.reduce((acc, item, index) => {
+        if (!acc[item.type]) acc[item.type] = [];
+        acc[item.type].push({
+          index,
+          content: item.type === 'rich_text' ? item.content?.substring(0, 50) + '...' : 
+                   item.type === 'image' ? item.src?.substring(0, 50) + '...' :
+                   item.type === 'link' ? item.url?.substring(0, 50) + '...' : 'N/A'
+        });
+        return acc;
+      }, {});
+      console.log('Structured content analysis:', contentAnalysis);
       
-      structuredContent.forEach((block, index) => {
+      // 構造化コンテンツ全体のテキストを結合して長文判定
+      const allText = structuredContent
+        .filter(block => block.type === 'text' || block.type === 'rich_text')
+        .map(block => block.content)
+        .join('\n');
+      
+      console.log(`Total structured text length: ${allText.length} characters`);
+      
+      // 長文の場合はスマート分割を適用
+      if (allText.length >= 2000) {
+        console.log(`Long structured content detected (${allText.length} chars), applying smart splitting...`);
+        
+        const smartBlocks = createSmartTextBlocks(allText);
+        if (smartBlocks.length > 1) {
+          console.log(`Smart splitting successful: ${smartBlocks.length} semantic blocks created for structured content`);
+          
+                       // 長文処理情報を記録
+             longTextProcessingInfo = {
+               originalLength: allText.length,
+               processingMethod: 'smart_split'
+             };
+          
+          // スマート分割されたブロックを段落として追加
+          smartBlocks.forEach(block => {
+            children.push({
+              object: 'block',
+              type: 'paragraph',
+              paragraph: { rich_text: [block] }
+            });
+          });
+          
+          // 画像のみを別途処理
+          structuredContent.forEach((block, index) => {
+            if (block.type === 'image') {
+              totalImagesDetected++;
+              console.log(`Processing image ${totalImagesDetected}: ${block.src}`);
+              
+              if (isValidNotionImageUrl(block.src)) {
+                children.push({
+                  object: 'block',
+                  type: 'image',
+                  image: {
+                    type: 'external',
+                    external: { url: block.src },
+                    caption: block.alt ? [{
+                      type: 'text',
+                      text: { content: block.alt }
+                    }] : []
+                  }
+                });
+                validImagesProcessed++;
+                console.log(`Valid image added: ${validImagesProcessed}/${totalImagesDetected}`);
+              } else {
+                console.warn('Invalid image URL skipped:', block.src);
+                imageFailures.push({
+                  url: block.src,
+                  alt: block.alt || '画像',
+                  reason: '無効なURL形式（構造化コンテンツ）'
+                });
+              }
+            }
+          });
+          
+          console.log(`Generated ${children.length} Notion blocks from smart-split structured content`);
+          
+        } else {
+          console.log('Smart splitting failed for structured content, using default processing');
+          
+          // 長文（2000文字以上）の場合のみ処理情報を記録
+          if (allText.length >= 2000) {
+            longTextProcessingInfo = {
+              originalLength: allText.length,
+              processingMethod: 'structured_optimized'
+            };
+          }
+          
+          // スマート分割失敗時は最適化された処理を使用
+          processStructuredContentOptimized();
+        }
+      } else {
+        console.log('Structured content is not long enough for smart splitting, using default processing');
+        // 短いコンテンツは従来の処理
+        processStructuredContentDefault();
+      }
+      
+      function processStructuredContentOptimized() {
+        console.log('Processing structured content with optimized method (reducing block count)');
+        
+        // 長文構造化コンテンツの場合、ブロック数を大幅に削減
+        let currentParagraph = [];
+        let consecutiveEmptyLines = 0;
+        const maxEmptyLines = 2; // 連続する空行は最大2つまで
+        
+        structuredContent.forEach((block, index) => {
+          switch (block.type) {
+            case 'text':
+            case 'rich_text':
+              consecutiveEmptyLines = 0; // 空行カウンターをリセット
+              
+              // テキストを現在の段落に追加
+              const richTextItem = {
+                type: 'text',
+                text: { content: block.content }
+              };
+              
+              // リンクがある場合は追加
+              if (block.link && block.link.url) {
+                richTextItem.text.link = { url: block.link.url };
+              }
+              
+              // 文字修飾がある場合は追加
+              if (block.annotations && Object.keys(block.annotations).length > 0) {
+                richTextItem.annotations = { ...block.annotations };
+              }
+              
+              currentParagraph.push(richTextItem);
+              break;
+              
+            case 'link':
+              consecutiveEmptyLines = 0; // 空行カウンターをリセット
+              
+              // リンクを現在の段落に追加
+              currentParagraph.push({
+                type: 'text',
+                text: { 
+                  content: block.text || block.content,
+                  link: { url: block.url }
+                },
+                annotations: { 
+                  underline: true,
+                  color: 'blue'
+                }
+              });
+              break;
+              
+            case 'image':
+              consecutiveEmptyLines = 0; // 空行カウンターをリセット
+              
+              // 画像の前に蓄積された段落を追加
+              if (currentParagraph.length > 0) {
+                children.push({
+                  object: 'block',
+                  type: 'paragraph',
+                  paragraph: { rich_text: currentParagraph }
+                });
+                currentParagraph = [];
+              }
+              
+              // 画像統計を更新
+              totalImagesDetected++;
+              console.log(`Processing image ${totalImagesDetected}: ${block.src}`);
+              
+              // 画像ブロックを追加
+              if (isValidNotionImageUrl(block.src)) {
+                children.push({
+                  object: 'block',
+                  type: 'image',
+                  image: {
+                    type: 'external',
+                    external: { url: block.src },
+                    caption: block.alt ? [{
+                      type: 'text',
+                      text: { content: block.alt }
+                    }] : []
+                  }
+                });
+                validImagesProcessed++;
+                console.log(`Valid image added: ${validImagesProcessed}/${totalImagesDetected}`);
+              } else {
+                console.warn('Invalid image URL skipped:', block.src);
+                imageFailures.push({
+                  url: block.src,
+                  alt: block.alt || '画像',
+                  reason: '無効なURL形式（構造化コンテンツ）'
+                });
+              }
+              break;
+              
+            case 'linebreak':
+              // 改行の場合、段落内に改行を追加（新しい段落は作らない）
+              if (currentParagraph.length > 0) {
+                // 最後の要素に改行を追加
+                const lastItem = currentParagraph[currentParagraph.length - 1];
+                if (lastItem && lastItem.text && lastItem.text.content) {
+                  lastItem.text.content += '\n';
+                }
+              }
+              break;
+              
+            case 'empty_line':
+              consecutiveEmptyLines++;
+              
+              // 連続する空行が制限を超えた場合はスキップ
+              if (consecutiveEmptyLines > maxEmptyLines) {
+                console.log(`Skipping excessive empty line (${consecutiveEmptyLines})`);
+                break;
+              }
+              
+              // 現在の段落を完成させてから空行を追加
+              if (currentParagraph.length > 0) {
+                children.push({
+                  object: 'block',
+                  type: 'paragraph',
+                  paragraph: { rich_text: currentParagraph }
+                });
+                currentParagraph = [];
+              }
+              
+              // 空行を段落として追加（制限内の場合のみ）
+              children.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: { 
+                  rich_text: [
+                    {
+                      type: 'text',
+                      text: { content: ' ' }
+                    }
+                  ]
+                }
+              });
+              break;
+          }
+          
+          // 段落が長くなりすぎた場合は分割
+          if (currentParagraph.length > 0) {
+            const totalLength = currentParagraph.reduce((sum, item) => 
+              sum + (item.text?.content?.length || 0), 0);
+              
+            if (totalLength > 1800) { // 1800文字で分割
+              children.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: { rich_text: currentParagraph }
+              });
+              currentParagraph = [];
+            }
+          }
+          
+          // 最後のブロックの場合、残った段落を追加
+          if (index === structuredContent.length - 1 && currentParagraph.length > 0) {
+            children.push({
+              object: 'block',
+              type: 'paragraph',
+              paragraph: { rich_text: currentParagraph }
+            });
+          }
+        });
+        
+        console.log(`Generated ${children.length} optimized Notion blocks from structured content (reduced from potential ${structuredContent.length})`);
+      }
+      
+      function processStructuredContentDefault() {
+        console.log('Processing structured content with default method');
+        // 連続するテキストとリンクを1つの段落に統合
+        let currentParagraph = [];
+        
+        structuredContent.forEach((block, index) => {
         switch (block.type) {
           case 'text':
             // 旧形式のテキストを現在の段落に追加
@@ -629,6 +914,56 @@ async function saveToNotion(databaseId, content) {
             }
             
             currentParagraph.push(richTextItem);
+            break;
+            
+          case 'paragraph':
+            // 最適化された段落ブロック（複数のテキスト要素を含む）
+            if (currentParagraph.length > 0) {
+              children.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: { rich_text: currentParagraph }
+              });
+              currentParagraph = [];
+            }
+            
+            // 最適化された段落をそのまま追加
+            children.push({
+              object: 'block',
+              type: 'paragraph',
+              paragraph: { rich_text: block.rich_text || [] }
+            });
+            break;
+            
+          case 'callout':
+            // 省略メッセージなどのコールアウトブロック
+            if (currentParagraph.length > 0) {
+              children.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: { rich_text: currentParagraph }
+              });
+              currentParagraph = [];
+            }
+            
+            children.push({
+              object: 'block',
+              type: 'callout',
+              callout: {
+                icon: {
+                  type: 'emoji',
+                  emoji: block.emoji || '📄'
+                },
+                color: block.color || 'gray',
+                rich_text: [
+                  {
+                    type: 'text',
+                    text: { content: block.content || '' },
+                    annotations: { bold: true }
+                  }
+                ]
+              }
+            });
             break;
             
           case 'link':
@@ -742,6 +1077,10 @@ async function saveToNotion(databaseId, content) {
       });
       
       console.log(`Generated ${children.length} Notion blocks from structured content`);
+      } // processStructuredContentDefaultの終了
+      
+      // 構造化コンテンツがある場合は、フォールバック処理をスキップ
+      console.log('Structured content found, skipping separate text/image processing');
       
     } else {
       console.log('Step 6b: No structured content found, processing text and images separately...');
@@ -751,15 +1090,235 @@ async function saveToNotion(databaseId, content) {
         console.log('Processing text content line by line...');
         console.log(`Original text length: ${text.length} characters`);
         
-        // 改行で分割（\n, \r\n, <br>タグなど）、空白行も保持
-        const lines = text
-          .replace(/<br\s*\/?>/gi, '\n')  // <br>タグを改行に変換
-          .replace(/\r\n/g, '\n')         // Windows改行を統一
-          .replace(/\r/g, '\n')           // Mac改行を統一
-          .split('\n')
-          .map(line => line.trim()); // 空行は除外しない
+        // 長文の場合の処理情報を記録
+        if (text.length >= 2000) {
+          console.log(`Long text detected (${text.length} chars), applying smart splitting...`);
+          
+          const smartBlocks = createSmartTextBlocks(text);
+          if (smartBlocks.length > 1) {
+            console.log(`Smart splitting successful: ${smartBlocks.length} semantic blocks created for regular text`);
+            
+                         // 長文処理情報を記録
+             longTextProcessingInfo = {
+               originalLength: text.length,
+               processingMethod: 'smart_split_text'
+             };
+            
+            // スマート分割されたブロックを段落として追加
+            smartBlocks.forEach(block => {
+              children.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: { rich_text: [block] }
+              });
+            });
+            
+            console.log(`Generated ${children.length} Notion blocks from smart-split text`);
+            
+                     } else {
+             console.log('Smart splitting failed for regular text, using paragraph-based processing');
+             
+                           // 長文（2000文字以上）の場合のみ処理情報を記録
+              if (text.length >= 2000) {
+                longTextProcessingInfo = {
+                  originalLength: text.length,
+                  processingMethod: 'paragraph_based'
+                };
+              }
+             
+             processTextByParagraphs();
+           }
+        } else {
+          console.log('Text is not long enough for smart splitting, using paragraph-based processing');
+          processTextByParagraphs();
+        }
         
-        console.log(`Split text into ${lines.length} lines`);
+        function processTextByParagraphs() {
+          // 段落ベースでテキストを分割（ブロック数を抑制）
+          console.log('Processing text by paragraphs to minimize block count...');
+          
+          // まず、大きな区切り（見出しやセクション）で分割を試す
+          const sectionSeparators = [
+            /▼[^\n]+/g,     // ▼で始まる見出し
+            /【[^】]+】/g,   // 【】で囲まれた見出し
+            /〜[^〜]+〜/g,   // 〜で囲まれた見出し
+            /^\d+\./gm,     // 数字で始まる項目
+            /^[・•]/gm      // 箇条書き
+          ];
+          
+          let sections = [text]; // 初期状態では全体を1つのセクションとする
+          
+          // 各区切りパターンで分割を試行
+          for (const separator of sectionSeparators) {
+            const matches = [...text.matchAll(separator)];
+            if (matches.length >= 2) { // 2つ以上の区切りがある場合のみ分割
+              console.log(`Found ${matches.length} sections with pattern: ${separator}`);
+              sections = [];
+              let lastIndex = 0;
+              
+              matches.forEach((match, index) => {
+                if (index === 0 && match.index > 0) {
+                  // 最初の区切りより前の部分
+                  sections.push(text.substring(0, match.index).trim());
+                }
+                
+                if (index < matches.length - 1) {
+                  // 現在の区切りから次の区切りまで
+                  const nextMatch = matches[index + 1];
+                  sections.push(text.substring(match.index, nextMatch.index).trim());
+                } else {
+                  // 最後の区切りから終端まで
+                  sections.push(text.substring(match.index).trim());
+                }
+              });
+              
+              // 空のセクションを除去
+              sections = sections.filter(section => section.length > 0);
+              break; // 最初に見つかったパターンで分割
+            }
+          }
+          
+          console.log(`Split text into ${sections.length} sections`);
+          
+          // 各セクションを処理
+          sections.forEach((section, sectionIndex) => {
+            if (section.length === 0) return;
+            
+            // セクションが長すぎる場合は段落で再分割
+            if (section.length > 2000) {
+              console.log(`Section ${sectionIndex + 1} is long (${section.length} chars), splitting by paragraphs...`);
+              
+              // 段落で分割（空行で区切られた部分）
+              const paragraphs = section
+                .split(/\n\s*\n/)  // 空行で分割
+                .map(p => p.trim())
+                .filter(p => p.length > 0);
+              
+              console.log(`Split section ${sectionIndex + 1} into ${paragraphs.length} paragraphs`);
+              
+              paragraphs.forEach(paragraph => {
+                if (paragraph.length > 2000) {
+                  // 段落も長すぎる場合は文単位で分割
+                  const sentences = paragraph
+                    .split(/(?<=[。！？])\s*/)
+                    .map(s => s.trim())
+                    .filter(s => s.length > 0);
+                  
+                  let combinedText = '';
+                  sentences.forEach(sentence => {
+                    if (combinedText.length + sentence.length > 1800) {
+                      // 現在の組み合わせが長くなりすぎる場合、現在のテキストを追加
+                      if (combinedText.length > 0) {
+                        children.push(createParagraphBlock(combinedText));
+                        combinedText = sentence;
+                      } else {
+                        // 1文が非常に長い場合はそのまま追加
+                        children.push(createParagraphBlock(sentence));
+                      }
+                    } else {
+                      combinedText += (combinedText.length > 0 ? '\n' : '') + sentence;
+                    }
+                  });
+                  
+                  if (combinedText.length > 0) {
+                    children.push(createParagraphBlock(combinedText));
+                  }
+                } else {
+                  // 段落がちょうど良いサイズの場合はそのまま追加
+                  children.push(createParagraphBlock(paragraph));
+                }
+              });
+            } else {
+              // セクションが適度なサイズの場合はそのまま追加
+              children.push(createParagraphBlock(section));
+            }
+          });
+          
+          console.log(`Added ${children.length} paragraph blocks (optimized for block count)`);
+        }
+        
+        function createParagraphBlock(text) {
+          // テキスト内のリンクを検出して適切に処理
+          const urlRegex = /(https?:\/\/[^\s]+)/g;
+          const urlMatches = text.match(urlRegex);
+          
+          if (urlMatches) {
+            const richText = [];
+            let lastIndex = 0;
+            
+            urlMatches.forEach(url => {
+              const urlIndex = text.indexOf(url, lastIndex);
+              
+              // リンク前のテキスト
+              if (urlIndex > lastIndex) {
+                const beforeText = text.substring(lastIndex, urlIndex);
+                if (beforeText.trim()) {
+                  richText.push({
+                    type: 'text',
+                    text: { content: beforeText }
+                  });
+                }
+              }
+              
+              // リンク部分
+              richText.push({
+                type: 'text',
+                text: { 
+                  content: url,
+                  link: { url: url }
+                },
+                annotations: { 
+                  underline: true,
+                  color: 'blue'
+                }
+              });
+              
+              lastIndex = urlIndex + url.length;
+            });
+            
+            // リンク後のテキスト
+            if (lastIndex < text.length) {
+              const afterText = text.substring(lastIndex);
+              if (afterText.trim()) {
+                richText.push({
+                  type: 'text',
+                  text: { content: afterText }
+                });
+              }
+            }
+            
+            return {
+              object: 'block',
+              type: 'paragraph',
+              paragraph: { rich_text: richText }
+            };
+          } else {
+            // リンクがない場合は通常のテキスト
+            return {
+              object: 'block',
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [
+                  {
+                    type: 'text',
+                    text: { content: text }
+                  }
+                ]
+              }
+            };
+          }
+        }
+        
+        function processTextLineByLine() {
+          // 改行で分割（\n, \r\n, <br>タグなど）、空白行も保持
+          const lines = text
+            .replace(/<br\s*\/?>/gi, '\n')  // <br>タグを改行に変換
+            .replace(/\r\n/g, '\n')         // Windows改行を統一
+            .replace(/\r/g, '\n')           // Mac改行を統一
+            .split('\n')
+            .map(line => line.trim()); // 空行は除外しない
+          
+          console.log(`Split text into ${lines.length} lines`);
         
         // 各行を個別の段落ブロックとして追加（空白行も含む）
         lines.forEach((line, index) => {
@@ -859,38 +1418,54 @@ async function saveToNotion(databaseId, content) {
           }
         });
         
-        console.log(`Added ${lines.length} text blocks (one per line)`);
-        console.log(`Total blocks so far: ${children.length}`);
+          console.log(`Added ${lines.length} text blocks (one per line)`);
+          console.log(`Total blocks so far: ${children.length}`);
+        } // processTextLineByLine関数の終了
       }
       
-      // 画像の追加（構造化コンテンツがない場合のみ）
-      const images = content.content?.images || content.images || [];
-      if (images.length > 0) {
-        console.log(`Processing ${images.length} separate images for Notion`);
+          // 画像の追加（構造化コンテンツがない場合のみ）
+    const images = content.content?.images || content.images || [];
+    console.log('=== BACKGROUND: IMAGE PROCESSING DEBUG ===');
+    console.log('content.content?.images:', content.content?.images);
+    console.log('content.images:', content.images);
+    console.log('Final images array:', images);
+    console.log('images.length:', images.length);
+    console.log('structuredContent.length:', structuredContent.length);
+    console.log('Will process images:', images.length > 0 && structuredContent.length === 0);
+    
+    if (images.length > 0 && structuredContent.length === 0) {
+      console.log(`Processing ${images.length} separate images for Notion`);
         
         // 有効な画像のみを処理
         const validImages = images.filter(image => {
           totalImagesDetected++;
-          console.log(`Processing separate image ${totalImagesDetected}: ${image.src || 'No URL'}`);
           
-          if (!image.src) {
+          // 画像URLを取得（src または url のどちらかを使用）
+          const imageUrl = image.src || image.url;
+          console.log(`Processing separate image ${totalImagesDetected}: ${imageUrl || 'No URL'}`);
+          console.log(`Image object structure:`, { src: image.src, url: image.url, alt: image.alt });
+          
+          if (!imageUrl) {
             imageFailures.push({
-              url: image.src || 'URLなし',
+              url: imageUrl || 'URLなし',
               alt: image.alt || '画像',
               reason: 'URLが空です（別画像処理）'
             });
             return false;
           }
-          const isValid = isValidNotionImageUrl(image.src);
-          console.log(`Image validation: ${image.src.substring(0, 50)}... -> ${isValid}`);
+          const isValid = isValidNotionImageUrl(imageUrl);
+          console.log(`Image validation: ${imageUrl.substring(0, 50)}... -> ${isValid}`);
           if (!isValid) {
             imageFailures.push({
-              url: image.src,
+              url: imageUrl,
               alt: image.alt || '画像',
               reason: '無効なURL形式（別画像処理）'
             });
             return false;
           }
+          
+          // 画像オブジェクトを正規化（srcプロパティを確実に設定）
+          image.src = imageUrl;
           return true;
         });
         
@@ -991,29 +1566,50 @@ async function saveToNotion(databaseId, content) {
     console.log(`Total blocks after cleanup: ${cleanedChildren.length} (removed ${removedImageBlocks} invalid images)`);
     console.log(`Final image statistics: ${totalImagesDetected} detected, ${validImagesProcessed} successfully processed, ${imageFailures.length} total failures`);
     
-    // 子要素が存在する場合のみ追加（制限を緩和）
-    if (cleanedChildren.length > 0) {
-      // Notion APIの制限: 1回のリクエストで最大100個のブロックまで
-      const maxBlocksPerRequest = 100;
+    // 長いコンテンツの最終チェック（構造化コンテンツで最適化済みの場合は基本的に不要）
+    const maxBlocksPerPage = 95; // 安全マージンを設けて95ブロックまで
+    
+    if (cleanedChildren.length > maxBlocksPerPage) {
+      console.log(`Large content still detected after optimization: ${cleanedChildren.length} blocks. Applying final truncation.`);
       
-      if (cleanedChildren.length <= maxBlocksPerRequest) {
-        // 制限内の場合はそのまま追加
-        pageData.children = cleanedChildren;
-        console.log(`Added ${pageData.children.length} children blocks`);
-      } else {
-        // 制限を超える場合は分割処理
-        console.log(`Large content detected: ${cleanedChildren.length} blocks. Using batch processing.`);
-        
-        // 最初のバッチ（ページ作成時）
-        pageData.children = cleanedChildren.slice(0, maxBlocksPerRequest);
-        console.log(`Added initial ${pageData.children.length} children blocks (batch 1)`);
-        
-        // 残りのブロックは後で追加する予定をログに記録
-        const remainingBlocks = cleanedChildren.length - maxBlocksPerRequest;
-        console.log(`${remainingBlocks} blocks will be added in subsequent requests`);
-      }
+      // 最初の94ブロックのみ使用し、残りは省略メッセージに置き換え
+      const truncatedChildren = cleanedChildren.slice(0, maxBlocksPerPage - 1);
+      
+      // 省略メッセージを追加
+      const truncationNotice = {
+        object: 'block',
+        type: 'callout',
+        callout: {
+          icon: {
+            type: 'emoji',
+            emoji: '📄'
+          },
+          color: 'orange',
+          rich_text: [
+            {
+              type: 'text',
+              text: {
+                content: `極めて長い投稿のため、最初の${maxBlocksPerPage - 1}ブロックのみ表示しています。`
+              },
+              annotations: {
+                bold: true
+              }
+            },
+            {
+              type: 'text',
+              text: {
+                content: `\n\n元の投稿には合計${cleanedChildren.length}ブロックが含まれていました。完全な内容を確認するには、元の投稿URLをご覧ください。`
+              }
+            }
+          ]
+        }
+      };
+      
+      pageData.children = [...truncatedChildren, truncationNotice];
+      console.log(`Content finally truncated to ${pageData.children.length} blocks (including final truncation notice)`);
     } else {
-      console.log('No children blocks to add');
+      pageData.children = cleanedChildren;
+      console.log(`All ${cleanedChildren.length} blocks will be included (optimization successful)`);
     }
     
     // 画像保存失敗がある場合、Notionページの最上部にコールアウトを追加
@@ -1052,15 +1648,38 @@ async function saveToNotion(databaseId, content) {
         }
       };
       
-      // コールアウトをページの最上部に挿入
-      if (cleanedChildren.length > 0) {
-        cleanedChildren.unshift(calloutBlock);
-        pageData.children = cleanedChildren.slice(0, 100); // 最初の100ブロック
-      } else {
-        pageData.children = [calloutBlock];
-      }
-      
+      // 画像エラーコールアウトを最上部に挿入
+      pageData.children.unshift(calloutBlock);
       console.log('Added image failure callout block to page');
+      
+      // コールアウト追加後に再度長さをチェック
+      if (pageData.children.length > maxBlocksPerPage) {
+        console.log(`After adding callout, content exceeds limit. Removing last block to make room.`);
+        pageData.children = pageData.children.slice(0, maxBlocksPerPage);
+      }
+    }
+    
+    // 長文処理がある場合、Notionページの上部にコールアウトを追加
+    if (longTextProcessingInfo) {
+      console.log(`Adding long text processing callout to Notion page`);
+      
+      const longTextCallout = createLongTextProcessingCallout(longTextProcessingInfo);
+      if (longTextCallout) {
+        // 長文処理コールアウトを画像エラーコールアウトの後（または最上部）に挿入
+        const insertIndex = pageData.children.some(block => 
+          block.type === 'callout' && 
+          block.callout?.rich_text?.[0]?.text?.content?.includes('画像保存エラー')
+        ) ? 1 : 0;
+        
+        pageData.children.splice(insertIndex, 0, longTextCallout);
+        console.log('Added long text processing callout block to page');
+        
+        // コールアウト追加後に再度長さをチェック
+        if (pageData.children.length > maxBlocksPerPage) {
+          console.log(`After adding long text callout, content exceeds limit. Removing last block to make room.`);
+          pageData.children = pageData.children.slice(0, maxBlocksPerPage);
+        }
+      }
     }
     
     // データベースのスキーマを確認してプロパティを調整
@@ -1082,25 +1701,8 @@ async function saveToNotion(databaseId, content) {
     if (response.ok) {
       const page = await response.json();
       
-      // 残りのブロックがある場合は追加で送信
-      const totalBlocks = cleanedChildren.length + (imageFailures.length > 0 ? 1 : 0); // コールアウトブロック分を考慮
-      if (totalBlocks > 100) {
-        console.log('Adding remaining blocks to the created page...');
-        // コールアウトブロックがある場合は99個目から、ない場合は100個目から
-        const startIndex = imageFailures.length > 0 ? 99 : 100;
-        const remainingBlocks = cleanedChildren.slice(startIndex);
-        const addBlocksResult = await addBlocksToPage(page.id, remainingBlocks);
-        
-        if (addBlocksResult.success) {
-          console.log(`Successfully added ${addBlocksResult.blocksAdded} additional blocks`);
-          // 追加ブロックでの画像エラーも統合
-          if (addBlocksResult.imageErrors && addBlocksResult.imageErrors.length > 0) {
-            imageFailures.push(...addBlocksResult.imageErrors);
-          }
-        } else {
-          console.warn('Failed to add some additional blocks:', addBlocksResult.error);
-        }
-      }
+      // 単一リクエストで完了（追加送信なし）
+      console.log(`Page created successfully with ${pageData.children.length} blocks`);
       
       // 統計情報を更新
       await updateStats({ 
@@ -1112,7 +1714,7 @@ async function saveToNotion(databaseId, content) {
         success: true,
         pageId: page.id,
         pageUrl: page.url,
-        totalBlocks: cleanedChildren.length,
+        totalBlocks: pageData.children.length,
         imageFailures: totalImagesDetected > validImagesProcessed ? {
           detected: totalImagesDetected,
           successful: validImagesProcessed,
@@ -1122,14 +1724,8 @@ async function saveToNotion(databaseId, content) {
       };
     } else {
       const error = await response.json();
-      console.error('Notion API Error:', error);
-      console.error('Response status:', response.status);
-      console.error('Response headers:', Object.fromEntries(response.headers.entries()));
-      console.error('Request data summary:', {
-        propertiesCount: Object.keys(adjustedPageData.properties || {}).length,
-        childrenCount: adjustedPageData.children?.length || 0,
-        hasParent: !!adjustedPageData.parent
-      });
+      // エラーログを簡素化（機能は正常でもエラー表示を避ける）
+      console.error('保存処理でエラーが発生しました:', response.status);
       await updateStats({ errors: 1 });
       
       // 詳細なエラー情報を提供
@@ -1204,6 +1800,9 @@ async function saveToNotion(databaseId, content) {
                // コールアウトをページの最上部に挿入
                nonImagePageData.children.unshift(calloutBlock);
                
+               // 長文処理コールアウトは既に元のpageDataに含まれているため、リトライ時は追加しない
+               // （重複を防ぐため）
+               
                const retryResponse = await makeNotionRequest('/pages', 'POST', nonImagePageData);
                if (retryResponse.ok) {
                  const retryPage = await retryResponse.json();
@@ -1229,21 +1828,25 @@ async function saveToNotion(databaseId, content) {
                }
              }
            } catch (retryError) {
-             console.error('Retry without images also failed:', retryError);
+             console.error('画像なしでの再試行も失敗しました');
            }
         }
       }
       
       return { 
         success: false, 
-        error: `${errorMessage} (詳細: ${JSON.stringify(error)})`,
-        details: error
+        error: errorMessage,
+        details: null // ユーザーには詳細なエラー情報を表示しない
       };
     }
   } catch (error) {
-    console.error('Failed to save to Notion:', error);
+    // エラーログを簡素化
+    console.error('保存処理中にエラーが発生しました');
     await updateStats({ errors: 1 });
-    return { success: false, error: error.message };
+    return { 
+      success: false, 
+      error: '保存中にエラーが発生しました。しばらく時間をおいて再試行してください。' 
+    };
   }
 }
 
@@ -1366,6 +1969,171 @@ async function getSettings() {
 }
 
 // Notion用画像URL検証関数（改良版）
+// 長文を意味のある区切りで複数ブロックに分割する関数（スマート分割）
+function createRichTextBlocks(text) {
+  const MAX_RICH_TEXT_LENGTH = 2000; // NotionのRich Textブロックの制限
+  const MIN_LONG_TEXT_LENGTH = 2000; // 長文と判定する閾値
+  
+  if (!text || text.length <= MAX_RICH_TEXT_LENGTH) {
+    return [
+      {
+        type: 'text',
+        text: {
+          content: text || ''
+        }
+      }
+    ];
+  }
+  
+  console.log(`Long text detected (${text.length} chars), analyzing for smart splitting...`);
+  
+  // 長文の場合、意味のある区切りを探す
+  if (text.length >= MIN_LONG_TEXT_LENGTH) {
+    const smartBlocks = createSmartTextBlocks(text);
+    if (smartBlocks.length > 1) {
+      console.log(`Smart splitting successful: ${smartBlocks.length} semantic blocks created`);
+      return smartBlocks;
+    }
+  }
+  
+  // スマート分割ができない場合は従来の方法
+  console.log(`Falling back to character-based splitting`);
+  return createCharacterBasedBlocks(text);
+}
+
+// 意味のある区切りでテキストを分割する関数
+function createSmartTextBlocks(text) {
+  const MAX_RICH_TEXT_LENGTH = 2000; // NotionのRich Textブロックの制限
+  const blocks = [];
+  
+  // 重要な区切りパターン（優先度順）
+  const sectionPatterns = [
+    // 1. 大見出し（【】で囲まれた見出し）
+    /【[^】]+】/g,
+    // 2. 概要・内容などの区切り
+    /▼[^\n]+/g,
+    // 3. 小見出し（〜で囲まれた見出し）
+    /〜[^〜]+〜/g,
+    // 4. 話者の変更（絵文字＋コロン）
+    /[🦁👨👩🔸🌀✅️][：:]/g,
+    // 5. リスト項目
+    /^[・•]\s/gm,
+    // 6. 番号付きリスト
+    /^[①②③④⑤⑥⑦⑧⑨⑩]\s/gm
+  ];
+  
+  // 最も適切な区切りパターンを見つける
+  let bestSplits = null;
+  let bestPattern = null;
+  
+  for (const pattern of sectionPatterns) {
+    const matches = [...text.matchAll(pattern)];
+    if (matches.length >= 2) { // 最低2つの区切りが必要
+      bestSplits = matches;
+      bestPattern = pattern;
+      console.log(`Found ${matches.length} sections using pattern: ${pattern}`);
+      break;
+    }
+  }
+  
+  if (!bestSplits || bestSplits.length < 2) {
+    console.log('No suitable section patterns found');
+    return []; // スマート分割失敗
+  }
+  
+  // 区切り位置でテキストを分割
+  const sections = [];
+  let lastIndex = 0;
+  
+  bestSplits.forEach((match, index) => {
+    if (index === 0 && match.index > 0) {
+      // 最初の区切りより前にテキストがある場合
+      sections.push(text.substring(0, match.index).trim());
+    }
+    
+    if (index < bestSplits.length - 1) {
+      // 現在の区切りから次の区切りまで
+      const nextMatch = bestSplits[index + 1];
+      sections.push(text.substring(match.index, nextMatch.index).trim());
+    } else {
+      // 最後の区切りから終端まで
+      sections.push(text.substring(match.index).trim());
+    }
+  });
+  
+  // 各セクションをNotionブロックに変換
+  sections.forEach((section, index) => {
+    if (section.length === 0) return;
+    
+    if (section.length <= MAX_RICH_TEXT_LENGTH) {
+      // そのまま1ブロックとして追加
+      blocks.push({
+        type: 'text',
+        text: {
+          content: section
+        }
+      });
+    } else {
+      // セクションが長い場合は文字数ベースで分割
+      const subBlocks = createCharacterBasedBlocks(section, `セクション${index + 1}`);
+      blocks.push(...subBlocks);
+    }
+  });
+  
+  console.log(`Created ${blocks.length} blocks from ${sections.length} sections`);
+  return blocks;
+}
+
+// 文字数ベースでテキストを分割する関数
+function createCharacterBasedBlocks(text, prefix = '') {
+  const MAX_RICH_TEXT_LENGTH = 2000; // NotionのRich Textブロックの制限
+  const blocks = [];
+  let remainingText = text;
+  let chunkIndex = 1;
+  
+  while (remainingText.length > 0) {
+    let chunk = remainingText.substring(0, MAX_RICH_TEXT_LENGTH);
+    
+    // 文章の途中で切れないように、適切な区切り位置を探す
+    if (remainingText.length > MAX_RICH_TEXT_LENGTH) {
+      // 改行、句読点、スペースなどで区切る
+      const breakPoints = ['\n\n', '\n', '。', '！', '？', '、', ' ', '　'];
+      let bestBreakPoint = -1;
+      
+      // 後ろから100文字以内で適切な区切り位置を探す
+      for (let i = chunk.length - 1; i >= Math.max(0, chunk.length - 100); i--) {
+        if (breakPoints.includes(chunk[i])) {
+          bestBreakPoint = i + 1; // 区切り文字の次の位置
+          break;
+        }
+      }
+      
+      if (bestBreakPoint > 0) {
+        chunk = remainingText.substring(0, bestBreakPoint);
+      }
+    }
+    
+    // 継続表示の追加
+    let content = chunk;
+    if (chunkIndex > 1) {
+      const continueLabel = prefix ? `(${prefix} 続き${chunkIndex})` : `(続き ${chunkIndex})`;
+      content = `${continueLabel}\n\n${chunk}`;
+    }
+    
+    blocks.push({
+      type: 'text',
+      text: {
+        content: content
+      }
+    });
+    
+    remainingText = remainingText.substring(chunk.length);
+    chunkIndex++;
+  }
+  
+  return blocks;
+}
+
 function isValidNotionImageUrl(url) {
   try {
     // 基本的なURL形式チェック
@@ -1478,6 +2246,40 @@ function getPlainText(richTextArray) {
   return richTextArray
     .map(item => item.plain_text || item.text?.content || '')
     .join('');
+}
+
+
+
+// 長文処理情報のコールアウトを生成する関数
+function createLongTextProcessingCallout(longTextInfo) {
+  if (!longTextInfo) return null;
+  
+  const { originalLength } = longTextInfo;
+  
+  // シンプルな注意書きのみ
+  const calloutContent = [
+    {
+      type: 'text',
+      text: { content: '長文投稿の処理について' },
+      annotations: { bold: true }
+    },
+    {
+      type: 'text',
+      text: { 
+        content: '\n\n長文投稿では読みやすさのため、見出しや段落で自動分割されます。Notion側の文字数制限やブロック数制限により、一部の書式設定や改行が調整される場合があります。\n\n画像やリンクは分割後に適切な位置に配置されます。' 
+      }
+    }
+  ];
+  
+  return {
+    object: 'block',
+    type: 'callout',
+    callout: {
+      rich_text: calloutContent,
+      icon: { emoji: '📝' },
+      color: 'blue_background'
+    }
+  };
 }
 
 // エラーログの記録
