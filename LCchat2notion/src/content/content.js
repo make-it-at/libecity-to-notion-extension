@@ -2653,13 +2653,8 @@ async function extractElementContent(element) {
           
           // 構造化コンテンツが存在する場合の重複防止処理
           const structuredTextLength = content.structuredContent
-            .filter(item => item.type === 'paragraph' && item.rich_text)
-            .reduce((total, item) => {
-              const textLength = item.rich_text
-                .filter(rt => rt.type === 'text' && rt.text && rt.text.content)
-                .reduce((sum, rt) => sum + rt.text.content.length, 0);
-              return total + textLength;
-            }, 0);
+            .filter(item => item.type === 'rich_text' && item.content)
+            .reduce((total, item) => total + (item.content ? item.content.length : 0), 0);
           
           console.log('Structured content analysis:', {
             structuredBlocks: content.structuredContent.length,
@@ -2754,13 +2749,8 @@ function validateAndCleanContent(content) {
       // 構造化コンテンツがある場合は許可
       if (cleanedContent.structuredContent && cleanedContent.structuredContent.length > 0) {
         const structuredTextLength = cleanedContent.structuredContent
-          .filter(item => item.type === 'paragraph' && item.rich_text)
-          .reduce((total, item) => {
-            const textLength = item.rich_text
-              .filter(rt => rt.type === 'text' && rt.text && rt.text.content)
-              .reduce((sum, rt) => sum + rt.text.content.length, 0);
-            return total + textLength;
-          }, 0);
+          .filter(item => item.type === 'rich_text' && item.content)
+          .reduce((total, item) => total + (item.content ? item.content.length : 0), 0);
         
         if (structuredTextLength > 10) {
           console.log('No main text but sufficient structured content found');
