@@ -2665,9 +2665,11 @@ async function extractElementContent(element) {
           // 構造化コンテンツに十分なテキストがある場合のみメインテキストをクリア
           if (structuredTextLength > 100) {
             console.log(`Sufficient structured content found (${structuredTextLength} chars), clearing main text to prevent duplication`);
-            content.text = ''; // 構造化コンテンツが存在する場合はメインテキストを使用しない
+            content.text = '（構造化コンテンツのみ使用）'; // 特別なマーカーを設定
+            content.useStructuredContentOnly = true; // フラグを設定
           } else {
             console.log(`Insufficient structured content (${structuredTextLength} chars), keeping main text to ensure content availability`);
+            content.useStructuredContentOnly = false;
           }
           
           // 構造化コンテンツから画像を抽出して、メイン画像配列に統合

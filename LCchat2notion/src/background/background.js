@@ -1166,7 +1166,7 @@ async function saveToNotion(databaseId, content) {
         console.log(`Insufficient structured content (${structuredTextContent.length} chars), adding main text to ensure content availability`);
         
         // 構造化コンテンツが少ない場合はメインテキストも追加
-        if (text && text.trim() && text.trim() !== '（構造化コンテンツ）') {
+        if (text && text.trim() && text.trim() !== '（構造化コンテンツ）' && text.trim() !== '（構造化コンテンツのみ使用）') {
           console.log('Adding main text content to supplement structured content...');
           
           // メインテキストを段落として追加
@@ -1187,7 +1187,7 @@ async function saveToNotion(databaseId, content) {
       console.log('Step 6b: No structured content found, processing text and images separately...');
       
       // テキストを行ごとに処理
-      if (text && text.trim()) {
+      if (text && text.trim() && text.trim() !== '（構造化コンテンツのみ使用）') {
         console.log('Processing text content line by line...');
         console.log(`Original text length: ${text.length} characters`);
         
