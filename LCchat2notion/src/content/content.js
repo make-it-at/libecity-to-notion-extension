@@ -2981,6 +2981,9 @@ function getPostUniqueId(postElement) {
   return fallbackId;
 }
 
+// Notionの制限値定数
+const MAX_RICH_TEXT_LENGTH = 2000; // NotionのRich Textブロックの制限
+
 // 汎用Notion保存処理（従来の投稿用）
 async function handleNotionSave(postElement, iconElement) {
   try {
