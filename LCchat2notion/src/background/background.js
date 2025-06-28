@@ -1160,7 +1160,7 @@ async function saveToNotion(databaseId, content) {
       });
       
       // 構造化コンテンツの文字数に基づいて重複防止判定
-      if (structuredTextContent.length > 500) {
+      if (structuredTextContent.length > 100) {
         console.log(`Sufficient structured content found (${structuredTextContent.length} chars), using structured content only to avoid duplication`);
       } else {
         console.log(`Insufficient structured content (${structuredTextContent.length} chars), adding main text to ensure content availability`);

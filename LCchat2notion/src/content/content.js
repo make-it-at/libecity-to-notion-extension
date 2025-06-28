@@ -2663,7 +2663,7 @@ async function extractElementContent(element) {
           });
           
           // 構造化コンテンツに十分なテキストがある場合のみメインテキストをクリア
-          if (structuredTextLength > 500) {
+          if (structuredTextLength > 100) {
             console.log(`Sufficient structured content found (${structuredTextLength} chars), clearing main text to prevent duplication`);
             content.text = ''; // 構造化コンテンツが存在する場合はメインテキストを使用しない
           } else {
