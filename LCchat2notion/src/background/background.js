@@ -688,8 +688,8 @@ async function saveToNotion(databaseId, content) {
       
       console.log(`Total structured text length: ${allText.length} characters`);
       
-      // 長文の場合はスマート分割を適用
-      if (allText.length >= 2000) {
+      // 長文の場合はスマート分割を適用（閾値を1000文字に下げる）
+      if (allText.length >= 1000) {
         console.log(`Long structured content detected (${allText.length} chars), applying smart splitting...`);
         
         const smartBlocks = createSmartTextBlocks(allText);
@@ -748,8 +748,8 @@ async function saveToNotion(databaseId, content) {
         } else {
           console.log('Smart splitting failed for structured content, using default processing');
           
-          // 長文（2000文字以上）の場合のみ処理情報を記録
-          if (allText.length >= 2000) {
+          // 長文（1000文字以上）の場合のみ処理情報を記録
+          if (allText.length >= 1000) {
             longTextProcessingInfo = {
               originalLength: allText.length,
               processingMethod: 'structured_optimized'
@@ -2004,8 +2004,19 @@ async function saveToNotion(databaseId, content) {
                // コールアウトをページの最上部に挿入
                nonImagePageData.children.unshift(calloutBlock);
                
-               // 長文処理コールアウトは既に元のpageDataに含まれているため、リトライ時は追加しない
-               // （重複を防ぐため）
+               // 長文処理コールアウトが既に含まれているかチェックして重複を防ぐ
+               const hasLongTextCallout = nonImagePageData.children.some(block => 
+                 block.type === 'callout' && 
+                 block.callout?.rich_text?.[0]?.text?.content?.includes('長文投稿の処理について')
+               );
+               
+               // 長文処理コールアウトが含まれていない場合のみ追加
+               if (longTextProcessingInfo && !hasLongTextCallout) {
+                 const longTextCallout = createLongTextProcessingCallout(longTextProcessingInfo);
+                 if (longTextCallout) {
+                   nonImagePageData.children.splice(1, 0, longTextCallout); // 画像エラーコールアウトの後に挿入
+                 }
+               }
                
                const retryResponse = await makeNotionRequest('/pages', 'POST', nonImagePageData);
                if (retryResponse.ok) {
@@ -2449,7 +2460,7 @@ async function getSettings() {
 // 長文を意味のある区切りで複数ブロックに分割する関数（スマート分割）
 function createRichTextBlocks(text) {
   const MAX_RICH_TEXT_LENGTH = 2000; // NotionのRich Textブロックの制限
-  const MIN_LONG_TEXT_LENGTH = 2000; // 長文と判定する閾値
+  const MIN_LONG_TEXT_LENGTH = 1000; // 長文と判定する閾値（1000文字に下げる）
   
   if (!text || text.length <= MAX_RICH_TEXT_LENGTH) {
     return [
