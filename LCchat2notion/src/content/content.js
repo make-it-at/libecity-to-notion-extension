@@ -1149,18 +1149,31 @@ function extractStructuredContent(element) {
   const cleanedContent = [];
   let lastType = null;
   
+  // 長文の場合は空白行を除去するかどうかを判定
+  const textLengthForCleaning = structuredContent
+    .filter(item => item.type === 'rich_text')
+    .reduce((total, item) => total + (item.content?.length || 0), 0);
+  
+  const isLongText = textLengthForCleaning > 100; // 長文判定
+  
   structuredContent.forEach((item, index) => {
+    // 長文の場合は空白行を除去
+    if (isLongText && item.type === 'empty_line') {
+      console.log('Removing empty line for long text optimization');
+      return;
+    }
+    
     // 連続する改行を防ぐ
     if (item.type === 'linebreak' && lastType === 'linebreak') {
       return;
     }
     
-    // 最初や最後の改行のみ除去（empty_lineは保持）
+    // 最初や最後の改行のみ除去
     if ((index === 0 || index === structuredContent.length - 1) && item.type === 'linebreak') {
       return;
     }
     
-    // empty_lineは意図的な空白行なので保持
+    // 短文の場合のみempty_lineを保持
     cleanedContent.push(item);
     lastType = item.type;
   });
