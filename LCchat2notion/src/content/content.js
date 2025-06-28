@@ -2680,8 +2680,13 @@ async function extractElementContent(element) {
           
           // 構造化コンテンツが存在する場合の重複防止処理
           const structuredTextLength = content.structuredContent
-            .filter(item => item.type === 'rich_text' && item.content)
-            .reduce((total, item) => total + item.content.length, 0);
+            .filter(item => item.type === 'paragraph' && item.rich_text)
+            .reduce((total, item) => {
+              const textLength = item.rich_text
+                .filter(rt => rt.type === 'text' && rt.text && rt.text.content)
+                .reduce((sum, rt) => sum + rt.text.content.length, 0);
+              return total + textLength;
+            }, 0);
           
           console.log('Structured content analysis:', {
             structuredBlocks: content.structuredContent.length,
@@ -2690,11 +2695,11 @@ async function extractElementContent(element) {
           });
           
           // 構造化コンテンツに十分なテキストがある場合のみメインテキストをクリア
-          if (structuredTextLength > 100) {
-            console.log('Sufficient structured content found, clearing main text to prevent duplication');
+          if (structuredTextLength > 500) {
+            console.log(`Sufficient structured content found (${structuredTextLength} chars), clearing main text to prevent duplication`);
             content.text = ''; // 構造化コンテンツが存在する場合はメインテキストを使用しない
           } else {
-            console.log('Insufficient structured content, keeping main text to ensure content availability');
+            console.log(`Insufficient structured content (${structuredTextLength} chars), keeping main text to ensure content availability`);
           }
           
           // 構造化コンテンツから画像を抽出して、メイン画像配列に統合
@@ -2776,8 +2781,13 @@ function validateAndCleanContent(content) {
       // 構造化コンテンツがある場合は許可
       if (cleanedContent.structuredContent && cleanedContent.structuredContent.length > 0) {
         const structuredTextLength = cleanedContent.structuredContent
-          .filter(item => item.type === 'rich_text' && item.content)
-          .reduce((total, item) => total + item.content.length, 0);
+          .filter(item => item.type === 'paragraph' && item.rich_text)
+          .reduce((total, item) => {
+            const textLength = item.rich_text
+              .filter(rt => rt.type === 'text' && rt.text && rt.text.content)
+              .reduce((sum, rt) => sum + rt.text.content.length, 0);
+            return total + textLength;
+          }, 0);
         
         if (structuredTextLength > 10) {
           console.log('No main text but sufficient structured content found');
