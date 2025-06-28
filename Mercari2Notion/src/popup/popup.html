@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mercari2Notion</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <img src="../../assets/icons/icon32.png" alt="Mercari2Notion" class="logo">
+            <h1>Mercari2Notion</h1>
+            <span class="version">v1.0.0</span>
+        </header>
+
+        <main class="main">
+            <div class="status-section">
+                <div class="status-indicator" id="statusIndicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text" id="statusText">待機中</span>
+                </div>
+            </div>
+
+            <div class="product-info" id="productInfo" style="display: none;">
+                <h3>商品情報</h3>
+                <div class="product-preview">
+                    <img id="productImage" src="" alt="商品画像" class="product-image">
+                    <div class="product-details">
+                        <p class="product-name" id="productName"></p>
+                        <p class="product-price" id="productPrice"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="actions">
+                <button id="saveButton" class="btn btn-primary" disabled>
+                    <span class="btn-icon">💾</span>
+                    Notionに保存
+                </button>
+                <button id="settingsButton" class="btn btn-secondary">
+                    <span class="btn-icon">⚙️</span>
+                    設定
+                </button>
+            </div>
+
+            <div class="progress-section" id="progressSection" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p class="progress-text" id="progressText">保存中...</p>
+            </div>
+
+            <div class="history-section">
+                <h3>保存履歴</h3>
+                <div class="history-list" id="historyList">
+                    <p class="no-history">保存履歴がありません</p>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>&copy; 2024 Mercari2Notion</p>
+        </footer>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html> 

@@ -11,50 +11,27 @@
     <!-- ヘッダー -->
     <div class="popup-header">
       <h1>LibeCity to Notion</h1>
-      <div class="version">v1.0.0</div>
+      <div class="version">v1.1.6</div>
     </div>
 
-    <!-- ステータス表示 -->
-    <div class="status-section">
-      <div class="status-item">
-        <span class="status-label">接続状態:</span>
-        <span id="connectionStatus" class="status-value">確認中...</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">ページ:</span>
-        <span id="pageStatus" class="status-value">確認中...</span>
+    <!-- 現在のページ状態 -->
+    <div class="page-status-banner" id="pageStatusBanner">
+      <div class="page-status-content">
+        <span class="page-status-icon">📍</span>
+        <span id="pageStatusText">ページを確認中...</span>
       </div>
     </div>
 
-    <!-- メイン操作エリア -->
-    <div class="main-section">
-      <!-- タブナビゲーション -->
-      <div class="tab-navigation">
-        <button id="statusTab" class="tab-btn active">ステータス</button>
-        <button id="settingsTab" class="tab-btn">設定</button>
-      </div>
-
-      <!-- ステータスタブ -->
-      <div id="statusContent" class="tab-content active">
-        <!-- データベース選択 -->
-        <div class="input-group">
-          <label for="databaseSelect">保存先データベース:</label>
-          <div class="database-select-container">
-            <select id="databaseSelect" class="database-select">
-              <option value="">データベースを選択してください...</option>
-            </select>
-            <button id="refreshDatabases" class="refresh-btn" title="データベース一覧を更新" aria-label="データベース一覧を更新">
-              <span class="refresh-icon">🔄</span>
-            </button>
-          </div>
+    <!-- メインコンテンツ -->
+    <div class="main-content">
+      <!-- ステップ1: APIキー設定 -->
+      <div class="setup-step" id="step1" data-step="1">
+        <div class="step-header">
+          <div class="step-number">1</div>
+          <div class="step-title">Notion API設定</div>
+          <div class="step-status" id="step1Status">未設定</div>
         </div>
-      </div>
-
-      <!-- 設定タブ -->
-      <div id="settingsContent" class="tab-content">
-        <!-- API設定 -->
-        <div class="settings-section">
-          <h3>Notion API設定</h3>
+        <div class="step-content">
           <div class="input-group">
             <label for="apiKey">APIキー:</label>
             <div class="api-key-container">
@@ -62,51 +39,140 @@
               <button type="button" id="toggleApiKey" class="toggle-btn" title="APIキーの表示/非表示">👁️</button>
             </div>
           </div>
-          <div class="input-group">
-            <button type="button" id="testConnection" class="test-btn">接続テスト</button>
+          <div class="step-actions">
+            <button type="button" id="testConnection" class="primary-btn">接続テスト</button>
             <span id="connectionResult" class="connection-result"></span>
           </div>
           <div class="api-help">
             <details>
-              <summary>APIキーの取得方法</summary>
+              <summary>📖 APIキーの取得方法</summary>
               <ol>
                 <li><a href="https://www.notion.so/my-integrations" target="_blank">Notion統合ページ</a>を開く</li>
                 <li>「新しい統合」をクリック</li>
                 <li>統合名を入力（例：「LibeCity to Notion」）</li>
                 <li>ワークスペースを選択して「送信」</li>
                 <li>生成されたAPIキーをコピーして上記に貼り付け</li>
-                <li>使用するページで統合を招待（共有→招待）</li>
+                <li><strong>重要:</strong> 使用するページで統合を招待（共有→招待）</li>
               </ol>
             </details>
           </div>
         </div>
+      </div>
 
-        <!-- 保存設定 -->
-        <div class="settings-section">
-          <h3>保存設定</h3>
-          <div class="checkbox-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="saveImages" checked>
-              <span class="checkmark"></span>
-              画像も保存する
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="saveLinks" checked>
-              <span class="checkmark"></span>
-              リンクも保存する
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="notifications" checked>
-              <span class="checkmark"></span>
-              保存完了時に通知を表示
-            </label>
+      <!-- ステップ2: Notionページ準備 -->
+      <div class="setup-step" id="step2" data-step="2">
+        <div class="step-header">
+          <div class="step-number">2</div>
+          <div class="step-title">Notionページ準備</div>
+          <div class="step-status" id="step2Status">待機中</div>
+        </div>
+        <div class="step-content">
+          <div class="preparation-guide">
+            <div class="guide-item">
+              <div class="guide-icon">📄</div>
+              <div class="guide-text">
+                <strong>Notionで任意のページを作成</strong><br>
+                データベースを作成するための親ページが必要です
+              </div>
+            </div>
+            <div class="guide-item">
+              <div class="guide-icon">🤝</div>
+              <div class="guide-text">
+                <strong>統合を招待</strong><br>
+                作成したページで「共有」→「招待」から統合を追加してください
+              </div>
+            </div>
+          </div>
+          <div class="step-actions">
+            <a href="https://www.notion.so" target="_blank" class="secondary-btn">
+              <span class="icon">🔗</span>
+              Notionを開く
+            </a>
+            <button type="button" id="checkPages" class="primary-btn">ページを確認</button>
+          </div>
+          <div id="pageCheckResult" class="check-result"></div>
+        </div>
+      </div>
+
+      <!-- ステップ3: データベース作成 -->
+      <div class="setup-step" id="step3" data-step="3">
+        <div class="step-header">
+          <div class="step-number">3</div>
+          <div class="step-title">専用データベース作成</div>
+          <div class="step-status" id="step3Status">待機中</div>
+        </div>
+        <div class="step-content">
+          <div class="database-info">
+            <div class="info-icon">🗃️</div>
+            <div class="info-text">
+              <strong>LibeCity専用データベースを作成</strong><br>
+              Title、URL、Author、Chat、Date、Tags、Statusの最適化されたスキーマ
+            </div>
+          </div>
+          <div class="step-actions">
+            <button id="createDatabase" class="primary-btn">
+              <span class="icon">➕</span>
+              標準データベースを作成
+            </button>
+          </div>
+          <div id="databaseCreateResult" class="check-result"></div>
+        </div>
+      </div>
+
+      <!-- ステップ4: 完了・データベース選択 -->
+      <div class="setup-step" id="step4" data-step="4">
+        <div class="step-header">
+          <div class="step-number">4</div>
+          <div class="step-title">設定完了</div>
+          <div class="step-status" id="step4Status">待機中</div>
+        </div>
+        <div class="step-content">
+          <div class="input-group">
+            <label for="databaseSelect">保存先データベース:</label>
+            <div class="database-select-container">
+              <select id="databaseSelect" class="database-select">
+                <option value="">データベースを選択してください...</option>
+              </select>
+              <button id="refreshDatabases" class="refresh-btn" title="データベース一覧を更新">
+                <span class="refresh-icon">🔄</span>
+              </button>
+            </div>
+          </div>
+          <div class="completion-message" id="completionMessage" style="display: none;">
+            <div class="success-icon">✅</div>
+            <div class="success-text">
+              <strong>設定完了！</strong><br>
+              LibeCityのページで投稿の保存ボタンをお使いください
+            </div>
           </div>
         </div>
+      </div>
 
-        <!-- 設定保存 -->
-        <div class="settings-actions">
-          <button type="button" id="saveSettings" class="save-settings-btn">設定を保存</button>
-        </div>
+      <!-- 詳細設定（折りたたみ） -->
+      <div class="advanced-settings">
+        <details>
+          <summary>⚙️ 詳細設定</summary>
+          <div class="settings-content">
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="saveImages" checked>
+                <span class="checkmark"></span>
+                画像も保存する
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="saveLinks" checked>
+                <span class="checkmark"></span>
+                リンクも保存する
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="notifications" checked>
+                <span class="checkmark"></span>
+                保存完了時に通知を表示
+              </label>
+            </div>
+            <button type="button" id="saveSettings" class="secondary-btn">設定を保存</button>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -144,8 +210,6 @@
       </div>
       <button id="retryBtn" class="retry-btn">再試行</button>
     </div>
-
-
 
     <!-- フッター -->
     <div class="popup-footer">

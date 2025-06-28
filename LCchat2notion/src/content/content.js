@@ -1019,37 +1019,107 @@ function extractStructuredContent(element) {
   if (postTextElement) {
     console.log('Found .post_text element, processing it specifically');
     
+    // まず全体のテキスト量を確認
+    const fullText = postTextElement.textContent.trim();
+    console.log(`Post text element total content length: ${fullText.length}`);
+    console.log(`Post text preview: "${fullText.substring(0, 100)}..."`);
+    
     // libecity.comの特殊な構造に対応：<p></p>や<p><br></p>を空白行として検出
     const paragraphs = postTextElement.querySelectorAll('p');
-    paragraphs.forEach((p, index) => {
-      const textContent = p.textContent.trim();
-      const hasOnlyBr = p.innerHTML.trim() === '<br>' || p.innerHTML.trim() === '';
-      
-      // 画像が含まれているかチェック
-      const hasImages = p.querySelectorAll('img').length > 0;
-      
-      // テキストも画像もない場合のみ空白行として処理
-      if ((!textContent || hasOnlyBr) && !hasImages) {
-        // 空白行として処理
-        structuredContent.push({
-          type: 'empty_line'
-        });
-        console.log(`Added empty line from <p> tag at index ${index}`);
-      } else {
-        // 通常の段落として処理（文字修飾と画像を含む）
-        console.log(`Processing paragraph ${index} with content: text=${!!textContent}, images=${hasImages}`);
+    console.log(`Found ${paragraphs.length} paragraph elements in .post_text`);
+    
+    // 段落が存在する場合は段落ベースで処理
+    if (paragraphs.length > 0) {
+      paragraphs.forEach((p, index) => {
+        const textContent = p.textContent.trim();
+        const hasOnlyBr = p.innerHTML.trim() === '<br>' || p.innerHTML.trim() === '';
         
-        // 子ノードを処理（テキストと画像の両方）
-        Array.from(p.childNodes).forEach(child => walkNodes(child, {}));
-      }
+        console.log(`Paragraph ${index}: text="${textContent.substring(0, 50)}..." (${textContent.length} chars), HTML="${p.innerHTML.trim().substring(0, 50)}..."`);
+        
+        // 画像が含まれているかチェック
+        const hasImages = p.querySelectorAll('img').length > 0;
+        
+        // テキストも画像もない場合のみ空白行として処理
+        if ((!textContent || hasOnlyBr) && !hasImages) {
+          // 空白行として処理
+          structuredContent.push({
+            type: 'empty_line'
+          });
+          console.log(`Added empty line from <p> tag at index ${index} (HTML: "${p.innerHTML.trim()}")`);
+        } else {
+          // 通常の段落として処理（文字修飾と画像を含む）
+          console.log(`Processing paragraph ${index} with content: text=${!!textContent}, images=${hasImages}`);
+          
+          // 段落内のテキストと画像を処理
+          const paragraphText = p.textContent.trim();
+          if (paragraphText) {
+            // テキストが存在する場合は、段落として追加
+            structuredContent.push({
+              type: 'rich_text',
+              content: paragraphText,
+              annotations: {}
+            });
+            console.log(`Added rich_text: "${paragraphText.substring(0, 50)}..." (${paragraphText.length} chars)`);
+          }
+          
+          // 段落内の画像も個別に処理
+          const paragraphImages = p.querySelectorAll('img');
+          paragraphImages.forEach(img => {
+            if (img.src) {
+              const validatedUrl = isValidImageUrl(img.src);
+              if (validatedUrl) {
+                structuredContent.push({
+                  type: 'image',
+                  src: typeof validatedUrl === 'string' ? validatedUrl : img.src,
+                  alt: img.alt && img.alt.trim() ? img.alt.trim() : '',
+                  title: img.title && img.title.trim() ? img.title.trim() : '',
+                  width: img.naturalWidth || img.width || 0,
+                  height: img.naturalHeight || img.height || 0
+                });
+              }
+            }
+          });
+          
+          // 子ノードも処理（リンクなどの他の要素用）
+          Array.from(p.childNodes).forEach(child => walkNodes(child, {}));
+        }
+        
+        // 各段落の後に改行を追加（最後の段落以外）
+        if (index < paragraphs.length - 1) {
+          structuredContent.push({
+            type: 'linebreak'
+          });
+        }
+      });
+    } else {
+      // 段落がない場合は、.post_text要素全体を処理
+      console.log('No paragraphs found, processing entire .post_text element');
+      Array.from(postTextElement.childNodes).forEach(child => walkNodes(child, {}));
+    }
+    
+    // 段落処理後に抽出されたテキスト量を確認
+    const extractedTextLength = structuredContent
+      .filter(item => item.type === 'rich_text' || item.type === 'text')
+      .reduce((total, item) => total + (item.content?.length || 0), 0);
+    
+    console.log(`Extracted ${extractedTextLength} characters from paragraphs (original: ${fullText.length})`);
+    
+    // 抽出されたテキストが元のテキストより大幅に少ない場合は、フォールバック処理
+    if (extractedTextLength < fullText.length * 0.5 && fullText.length > 100) {
+      console.warn('Paragraph extraction seems incomplete, using fallback method');
       
-      // 各段落の後に改行を追加（最後の段落以外）
-      if (index < paragraphs.length - 1) {
-        structuredContent.push({
-          type: 'linebreak'
-        });
-      }
-    });
+      // 既存の構造化コンテンツをクリア
+      structuredContent.length = 0;
+      
+      // .post_text要素全体を通常の方法で処理
+      Array.from(postTextElement.childNodes).forEach(child => walkNodes(child, {}));
+      
+      const fallbackTextLength = structuredContent
+        .filter(item => item.type === 'rich_text' || item.type === 'text')
+        .reduce((total, item) => total + (item.content?.length || 0), 0);
+      
+      console.log(`Fallback extraction: ${fallbackTextLength} characters`);
+    }
     
     // リンクプレビューも処理
     const linkPreviews = element.querySelectorAll('.link_preview');
@@ -1112,26 +1182,61 @@ function extractStructuredContent(element) {
       return;
     }
     
-    // 最初や最後の改行は除去
+    // 最初や最後の改行のみ除去（empty_lineは保持）
     if ((index === 0 || index === structuredContent.length - 1) && item.type === 'linebreak') {
       return;
     }
     
+    // empty_lineは意図的な空白行なので保持
     cleanedContent.push(item);
     lastType = item.type;
   });
 
-  console.log(`Extracted ${cleanedContent.length} structured content items`);
+  console.log(`Extracted ${structuredContent.length} raw items, cleaned to ${cleanedContent.length} items`);
   
-  // 長文投稿の場合はブロック数を最適化
-  const optimizedContent = optimizeStructuredContentForLongText(cleanedContent, 95);
+  // デバッグ用：クリーンアップ前後の詳細ログ
+  if (structuredContent.length !== cleanedContent.length) {
+    console.log('Items removed during cleanup:');
+    const removedItems = structuredContent.length - cleanedContent.length;
+    console.log(`  Removed ${removedItems} items`);
+  }
+  
+  // 最初の数個の要素をログ出力（デバッグ用）
+  console.log('First 5 cleaned content items:');
+  cleanedContent.slice(0, 5).forEach((item, index) => {
+    if (item.type === 'rich_text') {
+      console.log(`  ${index}: ${item.type} - "${item.content?.substring(0, 50)}..."`);
+    } else if (item.type === 'empty_line') {
+      console.log(`  ${index}: ${item.type} - (空白行)`);
+    } else {
+      console.log(`  ${index}: ${item.type}`);
+    }
+  });
+  
+  // テキスト長による分割戦略の決定
+  const totalTextLength = cleanedContent
+    .filter(item => item.type === 'rich_text')
+    .reduce((total, item) => total + (item.content?.length || 0), 0);
+  
+  console.log(`Total text length in structured content: ${totalTextLength} characters`);
+  
+  let optimizedContent;
+  if (totalTextLength > 2000) {
+    console.log('Long text detected - applying smart chunking strategy');
+    // 長文の場合：文字数制限を考慮した分割
+    optimizedContent = optimizeStructuredContentForLongText(cleanedContent, 30); // より少ないブロック数
+  } else {
+    console.log('Normal text length - applying standard optimization');
+    // 通常の場合：標準最適化
+    optimizedContent = optimizeStructuredContentForLongText(cleanedContent, 95);
+  }
   
   // デバッグ用：抽出された内容の概要をログ出力
   const summary = optimizedContent.reduce((acc, item) => {
     acc[item.type] = (acc[item.type] || 0) + 1;
     return acc;
   }, {});
-  console.log('Content structure summary:', summary);
+  console.log('Final content structure summary:', summary);
   
   // 画像の詳細ログ
   const images = optimizedContent.filter(item => item.type === 'image');
@@ -1143,16 +1248,52 @@ function extractStructuredContent(element) {
       console.log(`    Dimensions: ${img.width}x${img.height}`);
     });
   } else {
-    console.warn('No images found in structured content - this might indicate an extraction issue');
-    
-    // 元要素に画像があるかチェック
+    // 構造化コンテンツで画像が見つからない場合、元要素から直接画像を抽出
     const allImages = element.querySelectorAll('img');
     console.log(`Original element contains ${allImages.length} img tags:`);
-    allImages.forEach((img, index) => {
-      console.log(`  Original img ${index + 1}: ${img.src.substring(0, 80)}...`);
-      console.log(`    Classes: "${img.className}"`);
-      console.log(`    Parent tag: ${img.parentElement?.tagName}`);
-    });
+    
+    if (allImages.length > 0) {
+      console.log('Attempting to extract images from original element...');
+      allImages.forEach((img, index) => {
+        console.log(`  Original img ${index + 1}: ${img.src.substring(0, 80)}...`);
+        console.log(`    Classes: "${img.className}"`);
+        console.log(`    Parent tag: ${img.parentElement?.tagName}`);
+        
+        // プロフィール画像やアイコンではない画像のみを抽出
+        const isProfileImage = img.className.includes('user_proficon') || 
+                             img.className.includes('profile') ||
+                             img.className.includes('avatar') ||
+                             img.closest('.user_info, .profile, .avatar');
+        
+        const isNotionIcon = img.className.includes('notion') || 
+                           img.closest('.notion-save-icon');
+        
+        if (!isProfileImage && !isNotionIcon && img.src) {
+          const validatedUrl = isValidImageUrl(img.src);
+          if (validatedUrl) {
+            console.log(`Adding image from original element: ${img.src.substring(0, 50)}...`);
+            optimizedContent.push({
+              type: 'image',
+              src: typeof validatedUrl === 'string' ? validatedUrl : img.src,
+              alt: img.alt && img.alt.trim() ? img.alt.trim() : '',
+              title: img.title && img.title.trim() ? img.title.trim() : '',
+              width: img.naturalWidth || img.width || 0,
+              height: img.naturalHeight || img.height || 0
+            });
+          }
+        }
+      });
+      
+      // 追加された画像の数を確認
+      const addedImages = optimizedContent.filter(item => item.type === 'image').length;
+      if (addedImages > 0) {
+        console.log(`Successfully added ${addedImages} images from original element to structured content`);
+             } else {
+         console.log('No content images found (profile images and icons were excluded)');
+       }
+    } else {
+      console.log('No images found in original element either');
+    }
   }
   
   return optimizedContent;
@@ -2020,6 +2161,16 @@ async function extractElementContent(element) {
     // テキストコンテンツの抽出（改行を保持）
     let textElements = element.querySelectorAll(SELECTORS.postText);
     
+    // libecity.comの構造に対応した追加の抽出
+    if (textElements.length === 0) {
+      // .log_detail内の.post_textを探す
+      const logDetail = element.querySelector('.log_detail');
+      if (logDetail) {
+        textElements = logDetail.querySelectorAll('.post_text');
+        console.log(`Found ${textElements.length} text elements in .log_detail`);
+      }
+    }
+    
     // つぶやき投稿の場合の特別処理（改良版）
     if (textElements.length === 0) {
       console.log('No text elements found with standard selectors, trying tweet-specific extraction...');
@@ -2167,7 +2318,11 @@ async function extractElementContent(element) {
         'time', // 時刻要素
         'a.username', // ユーザー名リンク
         '.user_name',
-        '[class*="user"]'
+        '.chat_name', // チャット名
+        '.chat_icon', // チャットアイコン
+        '.user_proficon', // プロフィールアイコン
+        '[class*="user"]',
+        '[class*="icon"]'
       ];
       
       excludeSelectors.forEach(selector => {
@@ -2187,7 +2342,7 @@ async function extractElementContent(element) {
       tempDiv.innerHTML = html;
       let extractedText = (tempDiv.textContent || tempDiv.innerText || '').trim();
       
-      // 複数の改行を整理し、Notionアイコンのテキストを除去
+      // libecity.com特有のテキストを除去し、複数の改行を整理
       extractedText = extractedText
         .replace(/Notionに保存/g, '')
         .replace(/保存中\.\.\./g, '')
@@ -2195,6 +2350,7 @@ async function extractElementContent(element) {
         .replace(/保存完了!/g, '')
         .replace(/保存済み/g, '')
         .replace(/保存エラー/g, '')
+        .replace(/Re返信元/g, '') // libecity.comの返信表示
         .replace(/\s+/g, ' ')  // 複数の空白を1つに
         .replace(/\n{3,}/g, '\n\n')
         .trim();
@@ -2536,16 +2692,20 @@ async function extractElementContent(element) {
             const normalizedStructured = structuredText.replace(/\s+/g, ' ').trim().toLowerCase();
             const normalizedExisting = content.text.replace(/\s+/g, ' ').trim().toLowerCase();
             
-            // 類似度チェック：90%以上重複している場合は統合しない
+            // 類似度チェック：95%以上重複している場合のみ統合しない（より緩和）
             const similarity = calculateTextSimilarity(normalizedStructured, normalizedExisting);
             console.log('Text similarity check:', {
               structuredLength: structuredText.length,
               existingLength: content.text.length,
               similarity: similarity,
-              threshold: 0.9
+              threshold: 0.95
             });
             
-            if (similarity < 0.9 && 
+            // 構造化テキストの方が長い場合は優先して使用
+            if (structuredText.length > content.text.length * 1.5) {
+              content.text = structuredText;
+              console.log('Using longer structured text as main text');
+            } else if (similarity < 0.95 && 
                 !normalizedExisting.includes(normalizedStructured) && 
                 !normalizedStructured.includes(normalizedExisting)) {
               // 十分に異なるテキストの場合のみ追加
@@ -2925,8 +3085,18 @@ async function handleNotionSave(postElement, iconElement) {
     // 保存先データベースを取得
     let databaseId;
     try {
-      const settings = await chrome.storage.sync.get(['selectedDatabase']);
-      databaseId = settings.selectedDatabase;
+      const settings = await chrome.storage.sync.get(['notionDatabaseId']);
+      databaseId = settings.notionDatabaseId;
+      
+      // データベースIDの診断情報を表示
+      console.log('=== CONTENT SCRIPT DATABASE ID DIAGNOSTIC ===');
+      console.log('Retrieved database ID:', databaseId);
+      console.log('Database ID type:', typeof databaseId);
+      console.log('Database ID length:', databaseId ? databaseId.length : 'undefined');
+      console.log('Database ID format valid:', databaseId ? /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(databaseId) : false);
+      console.log('Full storage settings:', settings);
+      console.log('================================================');
+      
     } catch (error) {
       console.error('Failed to get storage settings:', error);
       throw new Error('設定の取得に失敗しました。拡張機能の権限を確認してください。');
@@ -2959,6 +3129,7 @@ async function handleNotionSave(postElement, iconElement) {
       
       console.log('=== BACKGROUND SCRIPT RESPONSE ===');
       console.log('Response:', response);
+      console.log('Response details:', JSON.stringify(response, null, 2));
     } catch (error) {
       console.error('Failed to send message to background script:', error);
       throw new Error('バックグラウンドスクリプトとの通信に失敗しました。拡張機能を再読み込みしてください。');
@@ -2983,6 +3154,13 @@ async function handleNotionSave(postElement, iconElement) {
       console.log('Post saved to Notion successfully');
       
     } else {
+      // デバッグ用：詳細なエラー情報をログ出力
+      console.error('=== DETAILED ERROR FROM BACKGROUND ===');
+      console.error('Error message:', response?.error);
+      console.error('Error details:', response?.details);
+      console.error('Full response:', JSON.stringify(response, null, 2));
+      console.error('=====================================');
+      
       // ユーザーフレンドリーなエラーメッセージに変換
       let userFriendlyError = '保存に失敗しました';
       const originalError = response?.error || '';
@@ -2995,6 +3173,9 @@ async function handleNotionSave(postElement, iconElement) {
         userFriendlyError = '画像の保存に失敗しました';
       } else if (originalError.includes('通信エラー')) {
         userFriendlyError = 'ネットワークエラーが発生しました';
+      } else {
+        // 詳細なエラー情報も含める（デバッグ用）
+        userFriendlyError = `保存に失敗しました: ${originalError}`;
       }
       
       throw new Error(userFriendlyError);
@@ -3052,13 +3233,13 @@ function showImageFailureCallout(imageFailures) {
       subMessage = `${imageFailures.successful}個の画像は正常に保存されました。テキストと他の要素も正常に保存されています。`;
     } else {
       message = `⚠️ 投稿は保存されましたが、${imageFailures.detected}個の画像が保存できませんでした`;
-      subMessage = 'テキストと他の要素は正常に保存されています';
+      subMessage = 'テキストと他の要素は正常に保存されています。画像保存エラー: Notion APIと互換性のないURL形式';
     }
   } else {
     // 古い構造の場合（後方互換性）
     const failureCount = Array.isArray(imageFailures) ? imageFailures.length : (imageFailures.failed || 1);
     message = `⚠️ 投稿は保存されましたが、${failureCount}個の画像が保存できませんでした`;
-    subMessage = 'テキストと他の要素は正常に保存されています';
+    subMessage = 'テキストと他の要素は正常に保存されています。画像保存エラー: Notion APIと互換性のないURL形式';
   }
   
   callout.innerHTML = `
@@ -3789,8 +3970,17 @@ async function handleTweetSave(tweetElement, iconElement) {
     }
     
     // 保存先データベース取得
-    const settings = await chrome.storage.sync.get(['selectedDatabase']);
-    const databaseId = settings.selectedDatabase;
+    const settings = await chrome.storage.sync.get(['notionDatabaseId']);
+    const databaseId = settings.notionDatabaseId;
+    
+    // データベースIDの診断情報を表示
+    console.log('=== TWEET SAVE DATABASE ID DIAGNOSTIC ===');
+    console.log('Retrieved database ID:', databaseId);
+    console.log('Database ID type:', typeof databaseId);
+    console.log('Database ID length:', databaseId ? databaseId.length : 'undefined');
+    console.log('Database ID format valid:', databaseId ? /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(databaseId) : false);
+    console.log('Full storage settings:', settings);
+    console.log('============================================');
     
     if (!databaseId) {
       throw new Error('保存先データベースが選択されていません');
@@ -3970,13 +4160,26 @@ function resetIcon(iconElement) {
   `;
 }
 
-// 長文投稿のブロック数最適化
+// 長文投稿のブロック数最適化（文字数制限対応）
 function optimizeStructuredContentForLongText(structuredContent, maxBlocks = 95) {
   console.log(`Optimizing structured content: ${structuredContent.length} blocks -> target: ${maxBlocks} blocks`);
   
   if (structuredContent.length <= maxBlocks) {
     console.log('Content is within block limit, no optimization needed');
     return structuredContent;
+  }
+  
+  // 総文字数を計算
+  const totalTextLength = structuredContent
+    .filter(item => item.type === 'rich_text')
+    .reduce((total, item) => total + (item.content?.length || 0), 0);
+  
+  console.log(`Total text length: ${totalTextLength} characters`);
+  
+  // 文字数制限を超える場合の特別処理
+  if (totalTextLength > 2000) {
+    console.log('Text exceeds 2000 character limit - applying aggressive optimization');
+    return optimizeForCharacterLimit(structuredContent, 2000);
   }
   
   // Step 1: 空白行を除去
@@ -4079,6 +4282,91 @@ function optimizeStructuredContentForLongText(structuredContent, maxBlocks = 95)
   }
   
   console.log(`Final optimization result: ${optimizedContent.length} blocks (reduced from ${structuredContent.length})`);
+  return optimizedContent;
+}
+
+// 文字数制限に対応した最適化処理
+function optimizeForCharacterLimit(structuredContent, maxCharacters = 2000) {
+  console.log(`Optimizing for character limit: ${maxCharacters} characters`);
+  
+  const optimizedContent = [];
+  let currentCharCount = 0;
+  let currentParagraph = [];
+  let currentParagraphCharCount = 0;
+  const maxParagraphLength = 800; // 1段落あたりの文字数制限
+  
+  for (let i = 0; i < structuredContent.length; i++) {
+    const item = structuredContent[i];
+    
+    // 画像は文字数にカウントしない
+    if (item.type === 'image') {
+      // 現在の段落があれば先にコミット
+      if (currentParagraph.length > 0) {
+        optimizedContent.push(createCombinedTextBlock(currentParagraph));
+        currentParagraph = [];
+        currentParagraphCharCount = 0;
+      }
+      
+      optimizedContent.push(item);
+      continue;
+    }
+    
+    // 空白行と改行は文字数にカウントしない
+    if (item.type === 'empty_line' || item.type === 'linebreak') {
+      currentParagraph.push(item);
+      continue;
+    }
+    
+    // テキストの場合
+    if (item.type === 'rich_text') {
+      const itemLength = item.content?.length || 0;
+      
+      // 文字数制限を超える場合
+      if (currentCharCount + itemLength > maxCharacters) {
+        console.log(`Character limit reached at item ${i}. Current: ${currentCharCount}, Item: ${itemLength}`);
+        
+        // 現在の段落をコミット
+        if (currentParagraph.length > 0) {
+          optimizedContent.push(createCombinedTextBlock(currentParagraph));
+        }
+        
+        // 省略メッセージを追加
+        const remainingItems = structuredContent.length - i;
+        const truncationBlock = {
+          type: 'paragraph',
+          rich_text: [{
+            type: 'text',
+            text: { content: `\n[長文のため省略] 残り約${remainingItems}個のコンテンツが省略されました。完全な内容は元の投稿をご確認ください。` },
+            annotations: { italic: true, color: 'gray' }
+          }]
+        };
+        optimizedContent.push(truncationBlock);
+        break;
+      }
+      
+      // 段落の文字数制限チェック
+      if (currentParagraphCharCount + itemLength > maxParagraphLength) {
+        // 現在の段落をコミット
+        if (currentParagraph.length > 0) {
+          optimizedContent.push(createCombinedTextBlock(currentParagraph));
+          currentParagraph = [];
+          currentParagraphCharCount = 0;
+        }
+      }
+      
+      // アイテムを段落に追加
+      currentParagraph.push(item);
+      currentCharCount += itemLength;
+      currentParagraphCharCount += itemLength;
+    }
+  }
+  
+  // 最後の段落をコミット
+  if (currentParagraph.length > 0) {
+    optimizedContent.push(createCombinedTextBlock(currentParagraph));
+  }
+  
+  console.log(`Character limit optimization complete: ${optimizedContent.length} blocks, ~${currentCharCount} characters`);
   return optimizedContent;
 }
 

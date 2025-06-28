@@ -149,6 +149,9 @@ async function handleMessage(request, sender) {
       case 'createDefaultDatabase':
         return await createDefaultDatabase(request.pageTitle);
         
+      case 'createStandardDatabase':
+        return await createStandardDatabase();
+        
       case 'saveToNotion':
         console.log('=== saveToNotion request received ===');
         console.log('Database ID:', request.databaseId);
@@ -221,11 +224,18 @@ async function testNotionConnection(testApiKey = null) {
 async function getDatabases() {
   try {
     const settings = await getSettings();
+    console.log('getDatabases - Settings check:', {
+      hasApiKey: !!settings.apiKey,
+      apiKeyLength: settings.apiKey?.length || 0,
+      settingsObject: Object.keys(settings)
+    });
     
     if (!settings.apiKey) {
+      console.error('getDatabases - No API key found in settings');
       return { success: false, error: 'APIキーが設定されていません' };
     }
     
+    console.log('getDatabases - Making Notion API request...');
     const response = await makeNotionRequest('/search', 'POST', {
       filter: {
         value: 'database',
@@ -237,8 +247,15 @@ async function getDatabases() {
       }
     });
     
+    console.log('getDatabases - Notion API response status:', response.status);
+    
     if (response.ok) {
       const data = await response.json();
+      console.log('getDatabases - Response data:', {
+        resultsCount: data.results?.length || 0,
+        hasResults: !!data.results
+      });
+      
       const databases = data.results.map(db => ({
         id: db.id,
         title: getPlainText(db.title),
@@ -246,13 +263,16 @@ async function getDatabases() {
         lastEdited: db.last_edited_time
       }));
       
+      console.log('getDatabases - Processed databases:', databases.length);
       return { success: true, databases };
     } else {
       const error = await response.json();
+      console.error('getDatabases - API error:', error);
       return { success: false, error: error.message || 'データベースの取得に失敗しました' };
     }
   } catch (error) {
     console.error('Failed to get databases:', error);
+    console.error('Error stack:', error.stack);
     return { success: false, error: error.message };
   }
 }
@@ -350,13 +370,27 @@ async function saveToNotion(databaseId, content) {
   
   try {
     console.log('=== saveToNotion started ===');
+    console.log('Received parameters:', {
+      databaseIdType: typeof databaseId,
+      databaseId: databaseId,
+      contentType: typeof content,
+      contentKeys: content ? Object.keys(content) : 'null'
+    });
     
     // 入力パラメータの検証
     if (!databaseId) {
+      console.error('VALIDATION ERROR: Database ID is missing');
       throw new Error('Database ID is required');
     }
     if (!content) {
+      console.error('VALIDATION ERROR: Content is missing');
       throw new Error('Content is required');
+    }
+    
+    // databaseIdの形式チェック
+    if (typeof databaseId !== 'string' || databaseId.length < 30) {
+      console.error('VALIDATION ERROR: Invalid database ID format:', databaseId);
+      throw new Error('Invalid database ID format');
     }
     
     console.log('Input validation passed');
@@ -375,8 +409,20 @@ async function saveToNotion(databaseId, content) {
       structuredContentCount: content.structuredContent?.length || 0,
       hasAuthor: !!content.author,
       hasTimestamp: !!content.timestamp,
-      hasUrl: !!content.url
+      hasUrl: !!content.url,
+      hasChatRoomName: !!content.chatRoomName
     });
+    
+    // 必須フィールドのチェック
+    if (!content.text || content.text.trim() === '') {
+      console.warn('WARNING: No text content found');
+    }
+    if (!content.author) {
+      console.warn('WARNING: No author found');
+    }
+    if (!content.url) {
+      console.warn('WARNING: No URL found');
+    }
     
     if (content.structuredContent && content.structuredContent.length > 0) {
       console.log('Structured content breakdown:');
@@ -996,8 +1042,8 @@ async function saveToNotion(databaseId, content) {
             totalImagesDetected++;
             console.log(`Processing image ${totalImagesDetected}: ${block.src}`);
             
-            // 画像ブロックを追加
-            if (isValidNotionImageUrl(block.src)) {
+            // 画像ブロックを追加（事前検証を強化）
+            if (isValidNotionImageUrl(block.src) && isNotionCompatibleImageUrl(block.src)) {
               children.push({
                 object: 'block',
                 type: 'image',
@@ -1013,12 +1059,24 @@ async function saveToNotion(databaseId, content) {
               validImagesProcessed++;
               console.log(`Valid image added: ${validImagesProcessed}/${totalImagesDetected}`);
             } else {
-              console.warn('Invalid image URL skipped:', block.src);
+              console.warn('Invalid or incompatible image URL skipped:', block.src);
               imageFailures.push({
                 url: block.src,
                 alt: block.alt || '画像',
-                reason: '無効なURL形式（構造化コンテンツ）'
+                reason: 'Notion APIと互換性のないURL形式'
               });
+              
+              // 画像の代わりにテキストリンクとして追加
+              if (block.alt || block.src) {
+                currentParagraph.push({
+                  type: 'text',
+                  text: { 
+                    content: `[画像: ${block.alt || '画像'}]`,
+                    link: { url: block.src }
+                  },
+                  annotations: { color: 'gray' }
+                });
+              }
             }
             break;
             
@@ -1079,8 +1137,130 @@ async function saveToNotion(databaseId, content) {
       console.log(`Generated ${children.length} Notion blocks from structured content`);
       } // processStructuredContentDefaultの終了
       
-      // 構造化コンテンツがある場合は、フォールバック処理をスキップ
-      console.log('Structured content found, skipping separate text/image processing');
+      // 構造化コンテンツの品質チェック
+      const structuredTextContent = structuredContent
+        .filter(block => block.type === 'rich_text' || block.type === 'text')
+        .map(block => block.content || '')
+        .join('');
+      
+      // 構造化コンテンツが存在し、かつ意味のあるコンテンツが含まれている場合は十分とみなす
+      const hasRichTextBlocks = structuredContent.some(block => 
+        (block.type === 'rich_text' || block.type === 'text') && 
+        block.content && block.content.trim().length > 10
+      );
+      const hasSubstantialStructuredContent = hasRichTextBlocks || structuredTextContent.length > text.length * 0.3;
+      
+      console.log('Structured content quality check:', {
+        structuredTextLength: structuredTextContent.length,
+        mainTextLength: text.length,
+        hasSubstantialContent: hasSubstantialStructuredContent,
+        childrenCount: children.length
+      });
+      
+             // 構造化コンテンツが不十分な場合はメインテキストを補完
+       if (!hasSubstantialStructuredContent && text && text.trim()) {
+         console.log('Structured content is insufficient, enhancing with main text...');
+         
+         // 既存の構造化コンテンツは保持し、不足分のみ補完
+         const originalChildrenCount = children.length;
+         console.log('Keeping existing structured content and adding main text...');
+         
+         // メインテキストを分割して構造化
+         // 短文の場合は改行でも分割、長文の場合は空行で分割
+         const textLength = text.length;
+         let paragraphs;
+         
+         if (textLength < 300) {
+           // 短文の場合：改行で分割（行ごとにブロック）
+           paragraphs = text
+             .split(/\n/) // 改行で分割
+             .map(p => p.trim())
+             .filter(p => p.length > 0);
+           console.log(`Short text detected (${textLength} chars), split by lines into ${paragraphs.length} blocks`);
+         } else {
+           // 長文の場合：空行で分割（段落ごとにブロック）
+           paragraphs = text
+             .split(/\n\s*\n/) // 空行で段落を分割
+             .map(p => p.trim())
+             .filter(p => p.length > 0);
+           console.log(`Long text detected (${textLength} chars), split by paragraphs into ${paragraphs.length} blocks`);
+         }
+         
+         // 構造化コンテンツに不足分があるかチェック
+         const existingText = structuredTextContent;
+         const missingText = text.replace(existingText, '').trim();
+         
+         if (missingText.length > 50) {
+           // 不足分のテキストがある場合のみ追加
+           console.log(`Adding missing text (${missingText.length} chars) to structured content...`);
+           
+           paragraphs.forEach((paragraph, index) => {
+             // 各段落内の改行を保持しつつ、ブロックとして追加
+             const lines = paragraph.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+             
+             if (lines.length === 1) {
+               // 単一行の段落 - 文字数制限をチェック
+               let content = lines[0];
+               if (content.length > 1900) {
+                 console.warn(`Single line is too long (${content.length} chars), truncating to 1900 chars`);
+                 content = content.substring(0, 1900) + '...';
+               }
+               children.push({
+                 object: 'block',
+                 type: 'paragraph',
+                 paragraph: { 
+                   rich_text: [{
+                     type: 'text',
+                     text: { content: content }
+                   }]
+                 }
+               });
+             } else {
+               // 複数行の段落（改行を保持） - 総文字数制限をチェック
+               const richTextItems = [];
+               let totalLength = 0;
+               
+               lines.forEach((line, lineIndex) => {
+                 // 改行文字も含めて文字数を計算
+                 const lineLength = line.length + (lineIndex < lines.length - 1 ? 1 : 0);
+                 
+                 if (totalLength + lineLength > 1900) {
+                   console.warn(`Multi-line paragraph is too long, truncating at line ${lineIndex + 1}`);
+                   return; // これ以上の行は追加しない
+                 }
+                 
+                 richTextItems.push({
+                   type: 'text',
+                   text: { content: line }
+                 });
+                 // 最後の行以外は改行を追加
+                 if (lineIndex < lines.length - 1) {
+                   richTextItems.push({
+                     type: 'text',
+                     text: { content: '\n' }
+                   });
+                 }
+                 
+                 totalLength += lineLength;
+               });
+               
+               if (richTextItems.length > 0) {
+                 children.push({
+                   object: 'block',
+                   type: 'paragraph',
+                   paragraph: { rich_text: richTextItems }
+                 });
+               }
+             }
+           });
+           
+           console.log(`Added ${children.length - originalChildrenCount} additional blocks to supplement structured content`);
+         } else {
+           console.log('Structured content appears to be sufficient after all, no additional blocks needed');
+         }
+       } else {
+         console.log('Structured content is sufficient, keeping original structure');
+       }
       
     } else {
       console.log('Step 6b: No structured content found, processing text and images separately...');
@@ -1206,6 +1386,19 @@ async function saveToNotion(databaseId, content) {
                   
                   let combinedText = '';
                   sentences.forEach(sentence => {
+                    // 個別の文が長すぎる場合は分割
+                    if (sentence.length > 1900) {
+                      console.warn(`Single sentence is too long (${sentence.length} chars), splitting...`);
+                      const chunks = [];
+                      for (let i = 0; i < sentence.length; i += 1800) {
+                        chunks.push(sentence.substring(i, i + 1800));
+                      }
+                      chunks.forEach(chunk => {
+                        children.push(createParagraphBlock(chunk));
+                      });
+                      return;
+                    }
+                    
                     if (combinedText.length + sentence.length > 1800) {
                       // 現在の組み合わせが長くなりすぎる場合、現在のテキストを追加
                       if (combinedText.length > 0) {
@@ -1238,6 +1431,12 @@ async function saveToNotion(databaseId, content) {
         }
         
         function createParagraphBlock(text) {
+          // 2000文字制限を確実に守る
+          if (text.length > 1900) {
+            console.warn(`Text block is too long (${text.length} chars), truncating to 1900 chars`);
+            text = text.substring(0, 1900) + '...';
+          }
+          
           // テキスト内のリンクを検出して適切に処理
           const urlRegex = /(https?:\/\/[^\s]+)/g;
           const urlMatches = text.match(urlRegex);
@@ -1527,28 +1726,105 @@ async function saveToNotion(databaseId, content) {
     console.log('Step 9: Final validation and cleanup of blocks...');
     console.log(`Image processing summary: ${totalImagesDetected} detected, ${validImagesProcessed} valid, ${imageFailures.length} failed`);
     
-    // 最終的な画像ブロックの検証とクリーンアップ（重複除去）
-    const cleanedChildren = [];
-    let removedImageBlocks = 0;
-    const finalImageFailures = []; // 最終検証での失敗のみ記録
-    
-    for (const block of children) {
+    // 最終的なブロック検証とクリーンアップ関数
+    function validateAndCleanBlock(block) {
       if (block.type === 'image') {
         const imageUrl = block.image?.external?.url;
         if (imageUrl && isValidNotionImageUrl(imageUrl)) {
-          cleanedChildren.push(block);
+          return { isValid: true, block: block };
         } else {
-          console.warn('Removing invalid image block during final validation:', imageUrl);
-          removedImageBlocks++;
-          finalImageFailures.push({
+          return { 
+            isValid: false, 
+            reason: '最終検証で無効と判定',
             url: imageUrl || 'Unknown URL',
-            alt: block.image?.caption?.[0]?.text?.content || '画像',
-            reason: '最終検証で無効と判定'
-          });
+            alt: block.image?.caption?.[0]?.text?.content || '画像'
+          };
+        }
+      } else if (block.type === 'paragraph') {
+        // パラグラフブロックの文字数チェック
+        const richText = block.paragraph?.rich_text || [];
+        let totalLength = 0;
+        
+        for (const item of richText) {
+          if (item.text?.content) {
+            totalLength += item.text.content.length;
+          }
+        }
+        
+        if (totalLength > 2000) {
+          console.warn(`Paragraph block is too long (${totalLength} chars), truncating...`);
+          // 文字数を制限
+          let currentLength = 0;
+          const truncatedRichText = [];
+          
+          for (const item of richText) {
+            if (item.text?.content) {
+              const remainingSpace = 1900 - currentLength;
+              if (remainingSpace <= 0) break;
+              
+              if (item.text.content.length <= remainingSpace) {
+                truncatedRichText.push(item);
+                currentLength += item.text.content.length;
+              } else {
+                // 部分的に追加
+                const truncatedItem = {
+                  ...item,
+                  text: {
+                    ...item.text,
+                    content: item.text.content.substring(0, remainingSpace - 3) + '...'
+                  }
+                };
+                truncatedRichText.push(truncatedItem);
+                break;
+              }
+            } else {
+              truncatedRichText.push(item);
+            }
+          }
+          
+          return {
+            isValid: true,
+            block: {
+              ...block,
+              paragraph: {
+                ...block.paragraph,
+                rich_text: truncatedRichText
+              }
+            }
+          };
+        }
+        
+        return { isValid: true, block: block };
+      } else {
+        // その他のブロックタイプ
+        return { isValid: true, block: block };
+      }
+    }
+    
+    // 全ブロックの検証とクリーンアップ
+    const cleanedChildren = [];
+    let removedImageBlocks = 0;
+    let truncatedTextBlocks = 0;
+    const finalImageFailures = []; // 最終検証での失敗のみ記録
+    
+    for (const block of children) {
+      const validation = validateAndCleanBlock(block);
+      
+      if (validation.isValid) {
+        cleanedChildren.push(validation.block);
+        if (validation.block !== block && block.type === 'paragraph') {
+          truncatedTextBlocks++;
         }
       } else {
-        // 画像以外のブロックはそのまま追加
-        cleanedChildren.push(block);
+        if (block.type === 'image') {
+          console.warn('Removing invalid image block during final validation:', validation.url);
+          removedImageBlocks++;
+          finalImageFailures.push({
+            url: validation.url,
+            alt: validation.alt,
+            reason: validation.reason
+          });
+        }
       }
     }
     
@@ -1562,8 +1838,12 @@ async function saveToNotion(databaseId, content) {
       console.log(`Removed ${removedImageBlocks} invalid image blocks during final validation`);
     }
     
+    if (truncatedTextBlocks > 0) {
+      console.log(`Truncated ${truncatedTextBlocks} text blocks to meet 2000-character limit`);
+    }
+    
     console.log('Step 10: Finalizing page data...');
-    console.log(`Total blocks after cleanup: ${cleanedChildren.length} (removed ${removedImageBlocks} invalid images)`);
+    console.log(`Total blocks after cleanup: ${cleanedChildren.length} (removed ${removedImageBlocks} invalid images, truncated ${truncatedTextBlocks} text blocks)`);
     console.log(`Final image statistics: ${totalImagesDetected} detected, ${validImagesProcessed} successfully processed, ${imageFailures.length} total failures`);
     
     // 長いコンテンツの最終チェック（構造化コンテンツで最適化済みの場合は基本的に不要）
@@ -1696,6 +1976,14 @@ async function saveToNotion(databaseId, content) {
       childrenCount: adjustedPageData.children?.length || 0
     });
     
+    // デバッグ: 実際に送信されるデータの構造を確認
+    console.log('=== NOTION API REQUEST DEBUG ===');
+    console.log('Database ID in parent:', adjustedPageData.parent?.database_id);
+    console.log('Parent structure:', adjustedPageData.parent);
+    console.log('Properties keys:', Object.keys(adjustedPageData.properties || {}));
+    console.log('Request payload size:', JSON.stringify(adjustedPageData).length, 'characters');
+    console.log('================================');
+    
     const response = await makeNotionRequest('/pages', 'POST', adjustedPageData);
     
     if (response.ok) {
@@ -1813,10 +2101,10 @@ async function saveToNotion(databaseId, content) {
                    pageId: retryPage.id,
                    pageUrl: retryPage.url,
                    totalBlocks: nonImagePageData.children.length,
-                   imageFailures: totalImagesDetected > validImagesProcessed ? {
+                   imageFailures: totalImagesDetected > 0 ? {
                      detected: totalImagesDetected,
-                     successful: validImagesProcessed,
-                     failed: totalImagesDetected - validImagesProcessed,
+                     successful: 0, // 画像なしでリトライしたので0
+                     failed: totalImagesDetected,
                      details: imageFailures
                    } : null
                  };
@@ -1835,15 +2123,39 @@ async function saveToNotion(databaseId, content) {
       return { 
         success: false, 
         error: errorMessage,
-        details: null // ユーザーには詳細なエラー情報を表示しない
+        details: {
+          errorMessage: errorMessage,
+          timestamp: new Date().toISOString(),
+          context: 'saveToNotion general error'
+        }
       };
     }
   } catch (error) {
     // エラー統計のみ更新（ログ出力なし）
     await updateStats({ errors: 1 });
+    
+    // デバッグのために詳細なエラー情報を出力
+    console.error('=== DETAILED ERROR INFORMATION ===');
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Error name:', error.name);
+    console.error('Full error object:', error);
+    console.error('=====================================');
+    
+    // 実際のエラー原因を含むメッセージを返す（デバッグ用）
+    let debugErrorMessage = '保存中にエラーが発生しました。';
+    if (error.message) {
+      debugErrorMessage += ` 詳細: ${error.message}`;
+    }
+    
     return { 
       success: false, 
-      error: '保存中にエラーが発生しました。しばらく時間をおいて再試行してください。' 
+      error: debugErrorMessage,
+      details: {
+        originalError: error.message,
+        errorStack: error.stack,
+        errorName: error.name
+      }
     };
   }
 }
@@ -1851,10 +2163,25 @@ async function saveToNotion(databaseId, content) {
 // データベースのスキーマに合わせてプロパティを調整
 async function adjustPropertiesForDatabase(databaseId, pageData) {
   try {
+    console.log('=== DATABASE SCHEMA VALIDATION ===');
+    console.log('Checking database schema for ID:', databaseId);
+    
     // データベースの詳細を取得
     const dbResponse = await makeNotionRequest(`/databases/${databaseId}`, 'GET');
     
     if (!dbResponse.ok) {
+      console.error('Failed to fetch database schema:', {
+        status: dbResponse.status,
+        statusText: dbResponse.statusText
+      });
+      
+      try {
+        const errorBody = await dbResponse.json();
+        console.error('Database fetch error details:', errorBody);
+      } catch (parseError) {
+        console.error('Could not parse database error response');
+      }
+      
       console.warn('Could not fetch database schema, using original properties');
       return pageData;
     }
@@ -1862,32 +2189,171 @@ async function adjustPropertiesForDatabase(databaseId, pageData) {
     const database = await dbResponse.json();
     const dbProperties = database.properties || {};
     
-    console.log('Database properties:', Object.keys(dbProperties));
+    console.log('Database properties found:', Object.keys(dbProperties));
+    console.log('Page data properties to validate:', Object.keys(pageData.properties));
     
-    // 存在するプロパティのみを保持
-    const adjustedProperties = {};
+    // プロパティマッピング定義（柔軟な対応）
+    const propertyMappings = {
+      // タイトル系
+      'Title': ['Title', 'タイトル', 'title', 'ToDo', 'TODO', 'Task', 'タスク', 'Name', '名前'],
+      // URL系
+      'URL': ['URL', 'url', 'Link', 'リンク', 'Source', 'ソース'],
+      // 作成者系
+      'Author': ['Author', '作成者', '担当者', 'Creator', 'User', 'ユーザー'],
+      // テキスト・チャット系
+      'Chat': ['Chat', 'チャット', 'Content', 'コンテンツ', '内容', 'Text', 'テキスト', 'Description', '説明'],
+      // 日付系
+      'Date': ['Date', '日付', '作成日時', '実行日', 'Created', 'Timestamp', 'タイムスタンプ'],
+      // ステータス系
+      'Status': ['Status', 'ステータス', '状態', 'State', 'Done', '完了'],
+      // タグ系
+      'Tags': ['Tags', 'タグ', 'Category', 'カテゴリ', '分類', 'Label', 'ラベル']
+    };
     
-    Object.entries(pageData.properties).forEach(([key, value]) => {
-      if (dbProperties[key]) {
-        adjustedProperties[key] = value;
-        if (key === 'URL') {
-          console.log(`URL property adjusted:`, {
-            originalValue: value,
-            dbPropertyType: dbProperties[key].type,
-            finalValue: adjustedProperties[key]
-          });
+    // 動的プロパティマッピング
+    const mappedProperties = {};
+    const unmappedOriginalProps = [];
+    
+    Object.entries(pageData.properties).forEach(([originalProp, value]) => {
+      const candidates = propertyMappings[originalProp] || [originalProp];
+      let mapped = false;
+      
+      for (const candidate of candidates) {
+        if (dbProperties[candidate]) {
+          const dbProp = dbProperties[candidate];
+          const pageType = Object.keys(value)[0];
+          
+          console.log(`Checking mapping: ${originalProp} -> ${candidate} (${dbProp.type})`);
+          
+          // 型の互換性チェックと変換
+          if (pageType === dbProp.type) {
+            // 完全一致
+            mappedProperties[candidate] = value;
+            console.log(`✓ Direct mapping: ${originalProp} -> ${candidate} (${dbProp.type})`);
+            mapped = true;
+            break;
+          } else if (dbProp.type === 'title' && pageType === 'rich_text') {
+            // rich_text -> title 変換
+            mappedProperties[candidate] = {
+              title: value.rich_text
+            };
+            console.log(`✓ Converted mapping: ${originalProp} -> ${candidate} (rich_text -> title)`);
+            mapped = true;
+            break;
+          } else if (dbProp.type === 'rich_text' && pageType === 'title') {
+            // title -> rich_text 変換
+            mappedProperties[candidate] = {
+              rich_text: value.title
+            };
+            console.log(`✓ Converted mapping: ${originalProp} -> ${candidate} (title -> rich_text)`);
+            mapped = true;
+            break;
+          } else if (dbProp.type === 'select' && pageType === 'select') {
+            // select型の値を検証
+            const selectValue = value.select?.name;
+            const availableOptions = dbProp.select?.options || [];
+            const validOption = availableOptions.find(opt => opt.name === selectValue);
+            
+            if (validOption) {
+              mappedProperties[candidate] = value;
+              console.log(`✓ Select mapping: ${originalProp} -> ${candidate} (${selectValue})`);
+              mapped = true;
+              break;
+            } else {
+              // デフォルト値を使用
+              if (availableOptions.length > 0) {
+                mappedProperties[candidate] = {
+                  select: { name: availableOptions[0].name }
+                };
+                console.log(`✓ Select mapping with default: ${originalProp} -> ${candidate} (${availableOptions[0].name})`);
+                mapped = true;
+                break;
+              }
+            }
+          }
         }
-      } else {
-        console.warn(`Property '${key}' does not exist in database, skipping`);
+      }
+      
+      if (!mapped) {
+        unmappedOriginalProps.push(originalProp);
+        console.warn(`✗ Could not map property: ${originalProp}`);
       }
     });
     
-    return {
+    // 必須プロパティ（Title）の確保
+    const titleProps = ['Title', 'タイトル', 'title', 'ToDo', 'TODO', 'Task', 'タスク', 'Name', '名前'];
+    let titleMapped = false;
+    
+    // 既にマッピングされたタイトルプロパティがあるかチェック
+    for (const titleProp of titleProps) {
+      if (mappedProperties[titleProp]) {
+        console.log(`✓ Title property already mapped: ${titleProp}`);
+        titleMapped = true;
+        break;
+      }
+    }
+    
+    // タイトルプロパティがまだマッピングされていない場合の緊急処理
+    if (!titleMapped) {
+      for (const titleProp of titleProps) {
+        if (dbProperties[titleProp]) {
+          const dbType = dbProperties[titleProp].type;
+          let titleContent = pageData.properties.Title?.title?.[0]?.text?.content || 
+                            pageData.properties.Chat?.rich_text?.[0]?.text?.content || 
+                            'LibeCity投稿';
+          
+          if (dbType === 'title') {
+            mappedProperties[titleProp] = {
+              title: [{
+                type: 'text',
+                text: { content: titleContent.substring(0, 100) } // タイトルは100文字まで
+              }]
+            };
+          } else if (dbType === 'rich_text') {
+            mappedProperties[titleProp] = {
+              rich_text: [{
+                type: 'text',
+                text: { content: titleContent }
+              }]
+            };
+          }
+          
+          console.log(`✓ Emergency title mapping: ${titleProp} (${dbType})`);
+          titleMapped = true;
+          break;
+        }
+      }
+    }
+    
+    if (!titleMapped) {
+      console.error('No suitable title property found in database');
+      console.error('Available database properties:', Object.keys(dbProperties));
+      console.error('Looking for title properties:', titleProps);
+      throw new Error('データベースにタイトル用のプロパティが見つかりません');
+    }
+    
+    console.log(`Mapping summary: ${Object.keys(mappedProperties).length} mapped, ${unmappedOriginalProps.length} unmapped`);
+    console.log('Mapped properties:', Object.keys(mappedProperties));
+    if (unmappedOriginalProps.length > 0) {
+      console.log('Unmapped properties:', unmappedOriginalProps);
+    }
+    console.log('==================================');
+    
+    const adjustedPageData = {
       ...pageData,
-      properties: adjustedProperties
+      properties: mappedProperties
     };
+    
+    return adjustedPageData;
   } catch (error) {
-    // エラー時は元のデータを返す（ログ出力なし）
+    console.error('=== DATABASE SCHEMA ADJUSTMENT ERROR ===');
+    console.error('Error during schema adjustment:', error);
+    console.error('Database ID:', databaseId);
+    console.error('Original page data keys:', Object.keys(pageData.properties));
+    console.error('========================================');
+    
+    // エラー時は元のデータを返すが、警告を出力
+    console.warn('Falling back to original page data due to schema adjustment error');
     return pageData;
   }
 }
@@ -1947,21 +2413,113 @@ async function makeNotionRequest(endpoint, method = 'GET', body = null) {
   
   if (body && (method === 'POST' || method === 'PATCH')) {
     options.body = JSON.stringify(body);
+    
+    // POSTリクエストの詳細ログ
+    if (method === 'POST' && endpoint === '/pages') {
+      console.log('=== POST REQUEST DETAILS ===');
+      console.log('Database ID:', body.parent?.database_id);
+      console.log('Properties count:', Object.keys(body.properties || {}).length);
+      console.log('Children blocks count:', body.children?.length || 0);
+      console.log('Request body size:', options.body.length, 'characters');
+      console.log('============================');
+    }
   }
   
   const url = `${NOTION_API.BASE_URL}${endpoint}`;
   console.log(`Making Notion API request: ${method} ${url}`);
   
-  return await fetch(url, options);
+  try {
+    const response = await fetch(url, options);
+    
+    // レスポンスが失敗の場合、詳細なエラー情報を出力
+    if (!response.ok) {
+      console.error('=== NOTION API ERROR ===');
+      console.error('Status:', response.status);
+      console.error('Status Text:', response.statusText);
+      console.error('URL:', url);
+      console.error('Method:', method);
+      
+      try {
+        const errorBody = await response.clone().json();
+        console.error('Error Response Body:', errorBody);
+        
+        // 404エラーの場合の詳細診断
+        if (response.status === 404 && method === 'POST' && endpoint === '/pages') {
+          console.error('=== DATABASE PERMISSION DIAGNOSTIC ===');
+          console.error('This 404 error during page creation suggests:');
+          console.error('1. Database exists (GET request succeeded)');
+          console.error('2. Integration has READ permission');
+          console.error('3. Integration lacks WRITE permission');
+          console.error('');
+          console.error('SOLUTION:');
+          console.error('1. Open the database in Notion');
+          console.error('2. Click "Share" button');
+          console.error('3. Find your integration');
+          console.error('4. Change permission from "Can view" to "Can edit"');
+          console.error('5. Or create a new database using the extension');
+          console.error('==========================================');
+        }
+      } catch (parseError) {
+        console.error('Could not parse error response as JSON');
+        const errorText = await response.clone().text();
+        console.error('Error Response Text:', errorText);
+      }
+      console.error('========================');
+    }
+    
+    return response;
+  } catch (fetchError) {
+    console.error('=== FETCH ERROR ===');
+    console.error('Fetch error:', fetchError);
+    console.error('URL:', url);
+    console.error('Method:', method);
+    console.error('==================');
+    throw fetchError;
+  }
 }
 
 // 設定の取得
 async function getSettings() {
   try {
+    console.log('getSettings - Attempting to get settings from chrome.storage.sync...');
     const result = await chrome.storage.sync.get('settings');
-    return result.settings || {};
+    console.log('getSettings - Raw storage result:', result);
+    
+    // 新しい形式（直接保存）もチェック - popup.jsで使用されているキー名も含める
+    const directResult = await chrome.storage.sync.get(['apiKey', 'notionApiKey', 'saveImages', 'saveLinks', 'notifications']);
+    console.log('getSettings - Direct storage result:', {
+      hasApiKey: !!directResult.apiKey,
+      hasNotionApiKey: !!directResult.notionApiKey,
+      apiKeyLength: directResult.apiKey?.length || 0,
+      notionApiKeyLength: directResult.notionApiKey?.length || 0,
+      saveImages: directResult.saveImages,
+      saveLinks: directResult.saveLinks,
+      notifications: directResult.notifications
+    });
+    
+    // 直接保存形式を優先（popup.jsで使用されているnotionApiKeyを優先）
+    const finalApiKey = directResult.notionApiKey || directResult.apiKey;
+    if (finalApiKey) {
+      console.log('getSettings - Using direct storage format with API key:', finalApiKey.substring(0, 10) + '...');
+      return {
+        apiKey: finalApiKey,
+        saveImages: directResult.saveImages !== false,
+        saveLinks: directResult.saveLinks !== false,
+        notifications: directResult.notifications !== false
+      };
+    }
+    
+    // 従来の settings オブジェクト形式
+    if (result.settings) {
+      console.log('getSettings - Using legacy settings object format');
+      return result.settings;
+    }
+    
+    console.log('getSettings - No settings found, returning empty object');
+    return {};
   } catch (error) {
-    // 設定取得失敗時はデフォルト値を返す（ログ出力なし）
+    console.error('getSettings - Error getting settings:', error);
+    // 設定取得失敗時はデフォルト値を返す
     return {};
   }
 }
@@ -2001,7 +2559,7 @@ function createRichTextBlocks(text) {
 
 // 意味のある区切りでテキストを分割する関数
 function createSmartTextBlocks(text) {
-  const MAX_RICH_TEXT_LENGTH = 2000; // NotionのRich Textブロックの制限
+  const MAX_RICH_TEXT_LENGTH = 1900; // 安全マージンを含めた制限
   const blocks = [];
   
   // 重要な区切りパターン（優先度順）
@@ -2035,8 +2593,9 @@ function createSmartTextBlocks(text) {
   }
   
   if (!bestSplits || bestSplits.length < 2) {
-    console.log('No suitable section patterns found');
-    return []; // スマート分割失敗
+    console.log('No suitable section patterns found, using character-based splitting');
+    // パターンが見つからない場合は文字数ベースで分割
+    return createCharacterBasedBlocks(text);
   }
   
   // 区切り位置でテキストを分割
@@ -2084,7 +2643,7 @@ function createSmartTextBlocks(text) {
 
 // 文字数ベースでテキストを分割する関数
 function createCharacterBasedBlocks(text, prefix = '') {
-  const MAX_RICH_TEXT_LENGTH = 2000; // NotionのRich Textブロックの制限
+  const MAX_RICH_TEXT_LENGTH = 1900; // 安全マージンを含めた制限
   const blocks = [];
   let remainingText = text;
   let chunkIndex = 1;
@@ -2116,6 +2675,20 @@ function createCharacterBasedBlocks(text, prefix = '') {
     if (chunkIndex > 1) {
       const continueLabel = prefix ? `(${prefix} 続き${chunkIndex})` : `(続き ${chunkIndex})`;
       content = `${continueLabel}\n\n${chunk}`;
+      
+      // 継続ラベルを追加した結果が制限を超える場合は調整
+      if (content.length > MAX_RICH_TEXT_LENGTH) {
+        const labelLength = continueLabel.length + 2; // \n\n分
+        const availableLength = MAX_RICH_TEXT_LENGTH - labelLength;
+        chunk = chunk.substring(0, availableLength);
+        content = `${continueLabel}\n\n${chunk}`;
+      }
+    }
+    
+    // 最終的な文字数チェック
+    if (content.length > MAX_RICH_TEXT_LENGTH) {
+      console.warn(`Block content is still too long (${content.length} chars), truncating...`);
+      content = content.substring(0, MAX_RICH_TEXT_LENGTH - 3) + '...';
     }
     
     blocks.push({
@@ -2210,14 +2783,31 @@ function isValidNotionImageUrl(url) {
       return false;
     }
     
+    // 信頼できる画像プロキシサービスをチェック
+    const trustedImageProxies = [
+      'images.weserv.nl',
+      'cdn.jsdelivr.net',
+      'i.imgur.com',
+      'media.giphy.com',
+      'lh3.googleusercontent.com',
+      'lh4.googleusercontent.com',
+      'lh5.googleusercontent.com',
+      'lh6.googleusercontent.com',
+      'lh7.googleusercontent.com'
+    ];
+    
+    const isTrustedProxy = trustedImageProxies.some(proxy => 
+      url.toLowerCase().includes(proxy)
+    );
+    
     // 画像拡張子のチェック（より柔軟に）
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
     const hasImageExtension = imageExtensions.some(ext => 
       url.toLowerCase().includes(ext)
     );
     
-    // 画像拡張子がない場合は警告だが許可（動的画像URLに対応）
-    if (!hasImageExtension) {
+    // 信頼できるプロキシの場合は拡張子チェックをスキップ
+    if (!isTrustedProxy && !hasImageExtension) {
       console.warn('URL may not be an image (no image extension):', url);
       // 但し、明らかに画像でないURLは除外
       if (url.includes('.html') || url.includes('.js') || url.includes('.css') || url.includes('.xml')) {
@@ -2231,6 +2821,45 @@ function isValidNotionImageUrl(url) {
     
   } catch (error) {
     console.warn('URL validation error:', error.message, 'URL:', url);
+    return false;
+  }
+}
+
+// Notion APIとの互換性をチェックする追加関数
+function isNotionCompatibleImageUrl(url) {
+  try {
+    if (!url || typeof url !== 'string') {
+      return false;
+    }
+    
+    // 既知の問題のあるパターンを除外
+    const problematicPatterns = [
+      // Google Docsの動的画像URL（keyパラメータ付き）
+      /googleusercontent\.com.*docsz.*key=/i,
+      // 非常に長いクエリパラメータ
+      /\?[^&]{200,}/,
+      // 複雑なエンコードされたURL
+      /%[0-9A-F]{2}.*%[0-9A-F]{2}.*%[0-9A-F]{2}/i
+    ];
+    
+    const hasProblematicPattern = problematicPatterns.some(pattern => 
+      pattern.test(url)
+    );
+    
+    if (hasProblematicPattern) {
+      console.log('Image URL has problematic pattern for Notion API:', url);
+      return false;
+    }
+    
+    // URL長制限（Notion APIは非常に長いURLを受け付けない）
+    if (url.length > 1000) {
+      console.log('Image URL too long for Notion API:', url.length, 'chars');
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.warn('Error checking Notion compatibility:', error.message);
     return false;
   }
 }
@@ -2522,4 +3151,106 @@ async function addBlocksToPage(pageId, blocks) {
   }
 }
 
-console.log('Background script setup complete'); 
+console.log('Background script setup complete');
+
+// 標準データベースの作成（LibeCity専用）
+async function createStandardDatabase() {
+  try {
+    console.log('Creating standard LibeCity database...');
+    
+    // 設定の確認
+    const settings = await getSettings();
+    if (!settings.apiKey) {
+      return { success: false, error: 'APIキーが設定されていません' };
+    }
+    
+    // 利用可能なページを検索
+    console.log('Searching for available pages...');
+    const searchResponse = await makeNotionRequest('/search', 'POST', {
+      filter: {
+        value: 'page',
+        property: 'object'
+      }
+    });
+    
+    let parentPageId = null;
+    
+    if (searchResponse.ok) {
+      const searchData = await searchResponse.json();
+      console.log(`Found ${searchData.results.length} pages`);
+      
+      if (searchData.results.length > 0) {
+        // 最初に見つかったページを親として使用
+        parentPageId = searchData.results[0].id;
+        console.log('Using existing page as parent:', searchData.results[0].properties?.title?.title?.[0]?.text?.content || 'Untitled');
+      } else {
+        return { 
+          success: false, 
+          error: 'Notionワークスペースに利用可能なページが見つかりません。先にNotionで任意のページを作成してから再試行してください。' 
+        };
+      }
+    } else {
+      return { success: false, error: 'ページの検索に失敗しました' };
+    }
+    
+    // データベースの作成
+    const timestamp = new Date().toLocaleDateString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).replace(/\//g, '-');
+    
+    const databaseTitle = `🗃️ LibeCity チャット投稿データベース (${timestamp})`;
+    
+    const databaseData = {
+      parent: {
+        type: 'page_id',
+        page_id: parentPageId
+      },
+      title: [
+        {
+          type: 'text',
+          text: {
+            content: databaseTitle
+          }
+        }
+      ],
+      properties: DEFAULT_DATABASE_SCHEMA
+    };
+    
+    console.log('Creating database with title:', databaseTitle);
+    const response = await makeNotionRequest('/databases', 'POST', databaseData);
+    
+    if (response.ok) {
+      const database = await response.json();
+      console.log('Database created successfully:', database.id);
+      
+      // 統計情報を更新
+      await updateStats({ databasesCreated: 1 });
+      
+      return {
+        success: true,
+        databaseId: database.id,
+        databaseUrl: database.url,
+        databaseTitle: databaseTitle
+      };
+    } else {
+      const error = await response.json();
+      console.error('Database creation failed:', error);
+      await updateStats({ errors: 1 });
+      return { 
+        success: false, 
+        error: error.message || 'データベースの作成に失敗しました',
+        details: error
+      };
+    }
+  } catch (error) {
+    console.error('Failed to create standard database:', error);
+    await updateStats({ errors: 1 });
+    return { success: false, error: error.message };
+  }
+}
+
+ 

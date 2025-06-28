@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gmail2Notion 詳細設定</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <!-- ヘッダー -->
+    <header class="header">
+      <div class="header-content">
+        <svg class="logo" width="32" height="32" viewBox="0 0 16 16">
+          <path fill="currentColor" d="M4.5 2A2.5 2.5 0 0 0 2 4.5v7A2.5 2.5 0 0 0 4.5 14h7a2.5 2.5 0 0 0 2.5-2.5v-7A2.5 2.5 0 0 0 11.5 2h-7zM3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v7a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 11.5v-7z"/>
+          <path fill="currentColor" d="M4.5 5.5A.5.5 0 0 1 5 5h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zM5 7a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1H5zM4.5 9.5A.5.5 0 0 1 5 9h3a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5z"/>
+        </svg>
+        <h1>Gmail2Notion 詳細設定</h1>
+        <span class="version">v1.0.0</span>
+      </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="main">
+      <!-- 基本設定セクション -->
+      <section class="section">
+        <h2>基本設定</h2>
+        <div class="card">
+          <form id="basicSettingsForm">
+            <div class="form-group">
+              <label for="notionApiKey">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 1L3 5V11C3 16.55 6.84 21.74 12 23C17.16 21.74 21 16.55 21 11V5L12 1M12 7C13.4 7 14.8 8.6 14.8 10V14.7C14.8 16.1 13.4 17.7 12 17.7C10.6 17.7 9.2 16.1 9.2 14.7V10C9.2 8.6 10.6 7 12 7Z"/>
+                </svg>
+                Notion APIキー
+              </label>
+              <input type="password" id="notionApiKey" placeholder="secret_xxxxxxxxxxxxxxxx" required>
+              <small class="help-text">
+                <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">Notion Developers</a>
+                でAPIキーを取得してください
+              </small>
+            </div>
+
+            <div class="form-group">
+              <label for="notionDatabaseId">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2L2 7L12 12L22 7L12 2M2 17L12 22L22 17M2 12L12 17L22 12"/>
+                </svg>
+                データベースID
+              </label>
+              <input type="text" id="notionDatabaseId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required>
+              <small class="help-text">
+                NotionデータベースのURLから32桁のIDを取得してください
+              </small>
+            </div>
+
+            <div class="button-group">
+              <button type="button" id="testConnection" class="btn btn-secondary">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+                </svg>
+                接続テスト
+              </button>
+              
+              <button type="submit" class="btn btn-primary">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z"/>
+                </svg>
+                設定を保存
+              </button>
+            </div>
+          </form>
+
+          <!-- ステータス表示 -->
+          <div id="status" class="status hidden"></div>
+        </div>
+      </section>
+
+      <!-- 動作設定セクション -->
+      <section class="section">
+        <h2>動作設定</h2>
+        <div class="card">
+          <div class="setting-item">
+            <div class="setting-info">
+              <h3>保存完了通知</h3>
+              <p>メールをNotionに保存した際に通知を表示します</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="showNotifications" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <h3>自動保存（開発中）</h3>
+              <p>特定の条件でメールを自動的にNotionに保存します</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="autoSave" disabled>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- データベース情報セクション -->
+      <section class="section">
+        <h2>データベース情報</h2>
+        <div class="card" id="databaseInfo">
+          <div class="database-details">
+            <div class="detail-item">
+              <span class="label">タイトル:</span>
+              <span class="value" id="dbTitle">-</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">プロパティ:</span>
+              <span class="value" id="dbProperties">-</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 使用方法セクション -->
+      <section class="section">
+        <h2>使用方法</h2>
+        <div class="card">
+          <div class="steps">
+            <div class="step">
+              <div class="step-number">1</div>
+              <div class="step-content">
+                <h3>Notion APIキーを取得</h3>
+                <p><a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">Notion Developers</a>でインテグレーションを作成し、APIキーを取得してください。</p>
+              </div>
+            </div>
+
+            <div class="step">
+              <div class="step-number">2</div>
+              <div class="step-content">
+                <h3>データベースを準備</h3>
+                <p>Notionでデータベースを作成し、「タイトル」と「URL」プロパティがあることを確認してください。</p>
+              </div>
+            </div>
+
+            <div class="step">
+              <div class="step-number">3</div>
+              <div class="step-content">
+                <h3>インテグレーションを招待</h3>
+                <p>作成したデータベースに、手順1で作成したインテグレーションを招待してください。</p>
+              </div>
+            </div>
+
+            <div class="step">
+              <div class="step-number">4</div>
+              <div class="step-content">
+                <h3>設定を完了</h3>
+                <p>上記のAPIキーとデータベースIDを入力し、接続テストを実行してください。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- フッター -->
+    <footer class="footer">
+      <div class="footer-content">
+        <p>&copy; 2025 Gmail2Notion. Made with ❤️ by Kyosuke Makita</p>
+        <div class="footer-links">
+          <a href="https://github.com/your-repo/gmail2notion" target="_blank" rel="noopener">GitHub</a>
+          <a href="mailto:support@example.com">サポート</a>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html> 

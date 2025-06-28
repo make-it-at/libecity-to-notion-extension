@@ -333,15 +333,12 @@ document.addEventListener('DOMContentLoaded', async function() {
       return;
     }
 
-
     try {
-      console.log('checkNotionPages function called');
       elements.checkPages.disabled = true;
       elements.checkPages.textContent = '確認中...';
       showPageCheckResult('pageCheckResult', 'ページを確認中...', 'info');
 
-      console.log("Fetching pages from Notion API...");
-      // ページ一覧を取得
+      console.log("Fetching pages from Notion API...");      // ページ一覧を取得
       const response = await fetch('https://api.notion.com/v1/search', {
         method: 'POST',
         headers: {
@@ -355,12 +352,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         })
       });
 
-      console.log("Notion API response status:", response.status);
-      if (response.ok) {
+      console.log("Notion API response status:", response.status);      if (response.ok) {
         const data = await response.json();
         const pageCount = data.results.length;
-        console.log("Found pages:", pageCount, data.results);
-        
+        console.log("Found pages:", pageCount, data.results);        
+        if (pageCount > 0) {
         if (pageCount > 0) {
           // ページタイトルを抽出
           const pageTitles = data.results.map(page => {
@@ -374,15 +370,14 @@ document.addEventListener('DOMContentLoaded', async function() {
             `📄 例: ${pageTitles.join(", ")}${pageCount > 3 ? "..." : ""}` : "";
           
           const message = `${pageCount}個のページにアクセス可能です\n${titleExamples}`;
-          showPageCheckResult("pageCheckResult", message, "success");
-          updateStepStatus("step2Status", "完了", "complete");
-          enableStep(3);
+          showPageCheckResult("pageCheckResult", message, "success");          enableStep(3);
         } else {
           showPageCheckResult("pageCheckResult", "⚠️ アクセス可能なページがありません。統合を招待してください", "warning");
-          updateStepStatus("step2Status", "要設定", "warning");
         }
-      } else {
-        throw new Error('ページの取得に失敗しました');
+          showPageCheckResult("pageCheckResult", "⚠️ アクセス可能なページがありません。統合を招待してください", "warning");
+          updateStepStatus("step2Status", "要設定", "warning");
+          showPageCheckResult("pageCheckResult", "⚠️ アクセス可能なページがありません。統合を招待してください", "warning");
+          updateStepStatus("step2Status", "要設定", "warning");
       }
 
     } catch (error) {
@@ -393,7 +388,6 @@ document.addEventListener('DOMContentLoaded', async function() {
       elements.checkPages.textContent = 'ページを確認';
     }
   }
-
 
   // データベース作成
   async function createNotionDatabase() {

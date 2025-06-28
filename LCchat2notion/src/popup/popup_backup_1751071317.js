@@ -311,6 +311,7 @@ document.addEventListener('DOMContentLoaded', async function() {
       console.error('Connection test error:', error);
       showConnectionResult(`接続エラー: ${error.message}`, 'error');
       updateStepStatus('step1Status', 'エラー', 'error');
+    } finally {
       elements.testConnection.disabled = false;
       elements.testConnection.textContent = '接続テスト';
     }
@@ -324,7 +325,6 @@ document.addEventListener('DOMContentLoaded', async function() {
 
   // Notionページ確認
   async function checkNotionPages() {
-    console.log("checkNotionPages function called");
     const result = await chrome.storage.sync.get(['notionApiKey']);
     const apiKey = result.notionApiKey;
     
@@ -333,14 +333,11 @@ document.addEventListener('DOMContentLoaded', async function() {
       return;
     }
 
-
     try {
-      console.log('checkNotionPages function called');
       elements.checkPages.disabled = true;
       elements.checkPages.textContent = '確認中...';
       showPageCheckResult('pageCheckResult', 'ページを確認中...', 'info');
 
-      console.log("Fetching pages from Notion API...");
       // ページ一覧を取得
       const response = await fetch('https://api.notion.com/v1/search', {
         method: 'POST',
@@ -355,31 +352,17 @@ document.addEventListener('DOMContentLoaded', async function() {
         })
       });
 
-      console.log("Notion API response status:", response.status);
       if (response.ok) {
         const data = await response.json();
         const pageCount = data.results.length;
-        console.log("Found pages:", pageCount, data.results);
         
         if (pageCount > 0) {
-          // ページタイトルを抽出
-          const pageTitles = data.results.map(page => {
-            const title = page.properties?.title?.title?.[0]?.plain_text || 
-                         page.properties?.Name?.title?.[0]?.plain_text ||
-                         "タイトルなし";
-            return title;
-          }).slice(0, 3); // 最初の3つのページのみ表示
-          
-          const titleExamples = pageTitles.length > 0 ? 
-            `📄 例: ${pageTitles.join(", ")}${pageCount > 3 ? "..." : ""}` : "";
-          
-          const message = `${pageCount}個のページにアクセス可能です\n${titleExamples}`;
-          showPageCheckResult("pageCheckResult", message, "success");
-          updateStepStatus("step2Status", "完了", "complete");
+          showPageCheckResult('pageCheckResult', `${pageCount}個のページにアクセス可能です`, 'success');
+          updateStepStatus('step2Status', '完了', 'complete');
           enableStep(3);
         } else {
-          showPageCheckResult("pageCheckResult", "⚠️ アクセス可能なページがありません。統合を招待してください", "warning");
-          updateStepStatus("step2Status", "要設定", "warning");
+          showPageCheckResult('pageCheckResult', '⚠️ アクセス可能なページがありません。統合を招待してください', 'warning');
+          updateStepStatus('step2Status', '要設定', 'warning');
         }
       } else {
         throw new Error('ページの取得に失敗しました');
@@ -393,7 +376,6 @@ document.addEventListener('DOMContentLoaded', async function() {
       elements.checkPages.textContent = 'ページを確認';
     }
   }
-
 
   // データベース作成
   async function createNotionDatabase() {
@@ -754,6 +736,4 @@ document.addEventListener('DOMContentLoaded', async function() {
       console.error('Failed to save database selection:', error);
     }
   }
-  // デバッグ用：関数をグローバルスコープに公開
-  window.checkNotionPages = checkNotionPages;
 }); 

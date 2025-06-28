@@ -1,44 +1,31 @@
 {
   "manifest_version": 3,
-  "name": "LibeCity to Notion",
-  "version": "1.1.6",
-  "description": "libecity.comのコンテンツをNotionに自動転記するChrome拡張機能",
-  
+  "name": "Mercari2Notion",
+  "version": "1.0.0",
+  "description": "メルカリの商品情報をNotionに自動保存するChrome拡張機能",
   "permissions": [
     "activeTab",
     "storage",
-    "scripting",
-    "identity"
+    "scripting"
   ],
-  
   "host_permissions": [
-    "https://libecity.com/*",
+    "https://jp.mercari.com/*",
     "https://api.notion.com/*"
   ],
-  
   "background": {
     "service_worker": "src/background/background.js"
   },
-  
   "content_scripts": [
     {
-      "matches": ["https://libecity.com/*"],
-      "js": ["src/content/content.js"],
+      "matches": ["https://jp.mercari.com/*"],
       "css": ["src/content/content.css"],
+      "js": ["src/content/content.js"],
       "run_at": "document_end"
     }
   ],
-  
-  "icons": {
-    "16": "assets/icons/icon16.png",
-    "32": "assets/icons/icon32.png",
-    "48": "assets/icons/icon48.png",
-    "128": "assets/icons/icon128.png"
-  },
-  
   "action": {
     "default_popup": "src/popup/popup.html",
-    "default_title": "LibeCity to Notion",
+    "default_title": "Mercari2Notion",
     "default_icon": {
       "16": "assets/icons/icon16.png",
       "32": "assets/icons/icon32.png",
@@ -46,11 +33,17 @@
       "128": "assets/icons/icon128.png"
     }
   },
-  
+  "options_page": "src/options/options.html",
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "32": "assets/icons/icon32.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
   "web_accessible_resources": [
     {
-      "resources": ["assets/*"],
-      "matches": ["https://libecity.com/*"]
+      "resources": ["assets/images/*"],
+      "matches": ["https://jp.mercari.com/*"]
     }
   ]
 } 

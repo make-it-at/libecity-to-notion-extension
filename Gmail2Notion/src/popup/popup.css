@@ -1,0 +1,463 @@
+/* Gmail2Notion Chrome Extension - Popup Styles */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 400px;
+  min-height: 500px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #333;
+  overflow-x: hidden;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  min-height: 500px;
+}
+
+/* ヘッダー */
+.header {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  padding: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  color: white;
+  flex-shrink: 0;
+}
+
+.header h1 {
+  color: white;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.version {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: auto;
+}
+
+/* メインコンテンツ */
+.content {
+  flex: 1;
+  padding: 24px;
+  background: white;
+}
+
+/* フォーム */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: #374151;
+  font-size: 14px;
+}
+
+.form-group label svg {
+  color: #6366f1;
+  flex-shrink: 0;
+}
+
+.form-group input[type="text"],
+.form-group input[type="password"] {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  background: #f9fafb;
+}
+
+.form-group input[type="text"]:focus,
+.form-group input[type="password"]:focus {
+  outline: none;
+  border-color: #6366f1;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.help-text {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.help-text a {
+  color: #6366f1;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.help-text a:hover {
+  text-decoration: underline;
+}
+
+/* チェックボックス */
+.checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s ease;
+}
+
+.checkbox-group:hover {
+  background: #f3f4f6;
+}
+
+.checkbox-group input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #6366f1;
+  cursor: pointer;
+}
+
+.checkbox-group label {
+  cursor: pointer;
+  margin: 0;
+  flex: 1;
+  font-weight: 400;
+}
+
+/* ボタン */
+.button-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  flex: 1;
+}
+
+.btn svg {
+  flex-shrink: 0;
+}
+
+.btn-primary {
+  background: #6366f1;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #5856eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.btn-secondary:hover {
+  background: #e5e7eb;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.btn-secondary:active {
+  transform: translateY(0);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.btn-warning {
+  background: #f59e0b;
+  color: white;
+  font-size: 12px;
+  padding: 8px 12px;
+}
+
+.btn-warning:hover {
+  background: #d97706;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.btn-warning:active {
+  transform: translateY(0);
+}
+
+/* 保存履歴情報 */
+.saved-emails-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+
+.saved-emails-info label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #374151;
+  margin: 0;
+}
+
+.saved-emails-info label svg {
+  color: #6b7280;
+}
+
+/* ステータス */
+.status {
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status.success {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.status.error {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.status.info {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+}
+
+.status.hidden {
+  display: none;
+}
+
+/* データベース情報 */
+.database-info {
+  margin-top: 20px;
+  padding: 16px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.database-info h3 {
+  color: #374151;
+  font-size: 16px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.database-info h3::before {
+  content: "🗃️";
+  font-size: 18px;
+}
+
+.info-content p {
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.info-content strong {
+  color: #374151;
+  font-weight: 500;
+}
+
+.database-info.hidden {
+  display: none;
+}
+
+/* フッター */
+.footer {
+  padding: 16px 24px;
+  background: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+  margin-top: auto;
+}
+
+.footer-links {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6b7280;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.link:hover {
+  color: #6366f1;
+}
+
+.link svg {
+  flex-shrink: 0;
+}
+
+/* ローディング状態 */
+.loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.loading::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(99, 102, 241, 0.2),
+    transparent
+  );
+  animation: loading-shimmer 1.5s infinite;
+}
+
+@keyframes loading-shimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* スクロールバー */
+.content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.content::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.content::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.content::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 420px) {
+  body {
+    width: 350px;
+  }
+  
+  .header {
+    padding: 16px;
+  }
+  
+  .content {
+    padding: 20px;
+  }
+  
+  .button-group {
+    flex-direction: column;
+  }
+  
+  .btn {
+    width: 100%;
+  }
+}
+
+/* アニメーション */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.form-group {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+.form-group:nth-child(1) { animation-delay: 0.1s; }
+.form-group:nth-child(2) { animation-delay: 0.2s; }
+.form-group:nth-child(3) { animation-delay: 0.3s; }
+.form-group:nth-child(4) { animation-delay: 0.4s; }
+.button-group { animation-delay: 0.5s; } 
