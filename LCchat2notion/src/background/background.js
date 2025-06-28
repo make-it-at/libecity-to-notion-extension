@@ -677,8 +677,13 @@ async function saveToNotion(databaseId, content) {
       
       // 構造化コンテンツ全体のテキストを結合して長文判定
       const allText = structuredContent
-        .filter(block => block.type === 'text' || block.type === 'rich_text')
-        .map(block => block.content)
+        .filter(block => block.type === 'paragraph' && block.rich_text)
+        .map(block => {
+          return block.rich_text
+            .filter(rt => rt.type === 'text' && rt.text && rt.text.content)
+            .map(rt => rt.text.content)
+            .join('');
+        })
         .join('\n');
       
       console.log(`Total structured text length: ${allText.length} characters`);
@@ -1139,8 +1144,13 @@ async function saveToNotion(databaseId, content) {
       
       // 構造化コンテンツの品質チェック
       const structuredTextContent = structuredContent
-        .filter(block => block.type === 'rich_text' || block.type === 'text')
-        .map(block => block.content || '')
+        .filter(block => block.type === 'paragraph' && block.rich_text)
+        .map(block => {
+          return block.rich_text
+            .filter(rt => rt.type === 'text' && rt.text && rt.text.content)
+            .map(rt => rt.text.content)
+            .join('');
+        })
         .join('');
       
       console.log('Structured content quality check:', {
@@ -1149,8 +1159,29 @@ async function saveToNotion(databaseId, content) {
         childrenCount: children.length
       });
       
-      // 構造化コンテンツが存在する場合は重複を避けるため、メインテキストの補完は行わない
-      console.log('Structured content found, using structured content only to avoid duplication');
+      // 構造化コンテンツの文字数に基づいて重複防止判定
+      if (structuredTextContent.length > 500) {
+        console.log(`Sufficient structured content found (${structuredTextContent.length} chars), using structured content only to avoid duplication`);
+      } else {
+        console.log(`Insufficient structured content (${structuredTextContent.length} chars), adding main text to ensure content availability`);
+        
+        // 構造化コンテンツが少ない場合はメインテキストも追加
+        if (text && text.trim() && text.trim() !== '（構造化コンテンツ）') {
+          console.log('Adding main text content to supplement structured content...');
+          
+          // メインテキストを段落として追加
+          const mainTextBlocks = createRichTextBlocks(text);
+          mainTextBlocks.forEach(block => {
+            children.push({
+              object: 'block',
+              type: 'paragraph',
+              paragraph: { rich_text: [block] }
+            });
+          });
+          
+          console.log(`Added ${mainTextBlocks.length} main text blocks to supplement structured content`);
+        }
+      }
       
     } else {
       console.log('Step 6b: No structured content found, processing text and images separately...');
