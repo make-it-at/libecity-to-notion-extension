@@ -1050,37 +1050,10 @@ function extractStructuredContent(element) {
           // 通常の段落として処理（文字修飾と画像を含む）
           console.log(`Processing paragraph ${index} with content: text=${!!textContent}, images=${hasImages}`);
           
-          // 段落内のテキストと画像を処理
-          const paragraphText = p.textContent.trim();
-          if (paragraphText) {
-            // テキストが存在する場合は、段落として追加
-            structuredContent.push({
-              type: 'rich_text',
-              content: paragraphText,
-              annotations: {}
-            });
-            console.log(`Added rich_text: "${paragraphText.substring(0, 50)}..." (${paragraphText.length} chars)`);
-          }
+          // 段落内のテキストと画像を処理（walkNodes関数を使用して重複を防ぐ）
+          console.log(`Processing paragraph ${index} with walkNodes to avoid duplication`);
           
-          // 段落内の画像も個別に処理
-          const paragraphImages = p.querySelectorAll('img');
-          paragraphImages.forEach(img => {
-            if (img.src) {
-              const validatedUrl = isValidImageUrl(img.src);
-              if (validatedUrl) {
-                structuredContent.push({
-                  type: 'image',
-                  src: typeof validatedUrl === 'string' ? validatedUrl : img.src,
-                  alt: img.alt && img.alt.trim() ? img.alt.trim() : '',
-                  title: img.title && img.title.trim() ? img.title.trim() : '',
-                  width: img.naturalWidth || img.width || 0,
-                  height: img.naturalHeight || img.height || 0
-                });
-              }
-            }
-          });
-          
-          // 子ノードも処理（リンクなどの他の要素用）
+          // 子ノードをwalkNodes関数で処理（テキスト、画像、リンクすべてを統一的に処理）
           Array.from(p.childNodes).forEach(child => walkNodes(child, {}));
         }
         
