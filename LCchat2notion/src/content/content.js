@@ -2678,9 +2678,24 @@ async function extractElementContent(element) {
           }, {});
           console.log('Structured content summary:', contentSummary);
           
-          // 構造化コンテンツが存在する場合は重複を防ぐため、メインテキストを空にする
-          console.log('Structured content found, clearing main text to prevent duplication');
-          content.text = ''; // 構造化コンテンツが存在する場合はメインテキストを使用しない
+          // 構造化コンテンツが存在する場合の重複防止処理
+          const structuredTextLength = content.structuredContent
+            .filter(item => item.type === 'rich_text' && item.content)
+            .reduce((total, item) => total + item.content.length, 0);
+          
+          console.log('Structured content analysis:', {
+            structuredBlocks: content.structuredContent.length,
+            structuredTextLength: structuredTextLength,
+            mainTextLength: content.text ? content.text.length : 0
+          });
+          
+          // 構造化コンテンツに十分なテキストがある場合のみメインテキストをクリア
+          if (structuredTextLength > 100) {
+            console.log('Sufficient structured content found, clearing main text to prevent duplication');
+            content.text = ''; // 構造化コンテンツが存在する場合はメインテキストを使用しない
+          } else {
+            console.log('Insufficient structured content, keeping main text to ensure content availability');
+          }
           
           // 構造化コンテンツから画像を抽出して、メイン画像配列に統合
           const structuredImages = content.structuredContent
@@ -2749,18 +2764,32 @@ function validateAndCleanContent(content) {
   try {
     const cleanedContent = { ...content };
     
-    // テキストの検証（最重要）
+    // テキストの検証（構造化コンテンツ考慮）
     if (!cleanedContent.text || typeof cleanedContent.text !== 'string') {
-      console.error('No text content provided');
-      throw new Error('テキストコンテンツが見つかりません。この投稿は保存できません。');
+      cleanedContent.text = '';
     }
     
     cleanedContent.text = cleanedContent.text.trim();
     
-    // テキストが空または無意味な場合はエラー
+    // テキストが空の場合、構造化コンテンツがあるかチェック
     if (cleanedContent.text.length === 0) {
-      console.error('Empty text content after cleaning');
-      throw new Error('テキストコンテンツが空です。この投稿は保存できません。');
+      // 構造化コンテンツがある場合は許可
+      if (cleanedContent.structuredContent && cleanedContent.structuredContent.length > 0) {
+        const structuredTextLength = cleanedContent.structuredContent
+          .filter(item => item.type === 'rich_text' && item.content)
+          .reduce((total, item) => total + item.content.length, 0);
+        
+        if (structuredTextLength > 10) {
+          console.log('No main text but sufficient structured content found');
+          cleanedContent.text = '（構造化コンテンツ）'; // プレースホルダーテキスト
+        } else {
+          console.error('Empty text content and insufficient structured content');
+          throw new Error('テキストコンテンツが空です。この投稿は保存できません。');
+        }
+      } else {
+        console.error('Empty text content after cleaning');
+        throw new Error('テキストコンテンツが空です。この投稿は保存できません。');
+      }
     }
     
     // 非常に短いテキスト（2文字以下）の場合は警告
