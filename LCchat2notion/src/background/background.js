@@ -1143,124 +1143,14 @@ async function saveToNotion(databaseId, content) {
         .map(block => block.content || '')
         .join('');
       
-      // 構造化コンテンツが存在し、かつ意味のあるコンテンツが含まれている場合は十分とみなす
-      const hasRichTextBlocks = structuredContent.some(block => 
-        (block.type === 'rich_text' || block.type === 'text') && 
-        block.content && block.content.trim().length > 10
-      );
-      const hasSubstantialStructuredContent = hasRichTextBlocks || structuredTextContent.length > text.length * 0.3;
-      
       console.log('Structured content quality check:', {
         structuredTextLength: structuredTextContent.length,
         mainTextLength: text.length,
-        hasSubstantialContent: hasSubstantialStructuredContent,
         childrenCount: children.length
       });
       
-             // 構造化コンテンツが不十分な場合はメインテキストを補完
-       if (!hasSubstantialStructuredContent && text && text.trim()) {
-         console.log('Structured content is insufficient, enhancing with main text...');
-         
-         // 既存の構造化コンテンツは保持し、不足分のみ補完
-         const originalChildrenCount = children.length;
-         console.log('Keeping existing structured content and adding main text...');
-         
-         // メインテキストを分割して構造化
-         // 短文の場合は改行でも分割、長文の場合は空行で分割
-         const textLength = text.length;
-         let paragraphs;
-         
-         if (textLength < 300) {
-           // 短文の場合：改行で分割（行ごとにブロック）
-           paragraphs = text
-             .split(/\n/) // 改行で分割
-             .map(p => p.trim())
-             .filter(p => p.length > 0);
-           console.log(`Short text detected (${textLength} chars), split by lines into ${paragraphs.length} blocks`);
-         } else {
-           // 長文の場合：空行で分割（段落ごとにブロック）
-           paragraphs = text
-             .split(/\n\s*\n/) // 空行で段落を分割
-             .map(p => p.trim())
-             .filter(p => p.length > 0);
-           console.log(`Long text detected (${textLength} chars), split by paragraphs into ${paragraphs.length} blocks`);
-         }
-         
-         // 構造化コンテンツに不足分があるかチェック
-         const existingText = structuredTextContent;
-         const missingText = text.replace(existingText, '').trim();
-         
-         if (missingText.length > 50) {
-           // 不足分のテキストがある場合のみ追加
-           console.log(`Adding missing text (${missingText.length} chars) to structured content...`);
-           
-           paragraphs.forEach((paragraph, index) => {
-             // 各段落内の改行を保持しつつ、ブロックとして追加
-             const lines = paragraph.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-             
-             if (lines.length === 1) {
-               // 単一行の段落 - 文字数制限をチェック
-               let content = lines[0];
-               if (content.length > 1900) {
-                 console.warn(`Single line is too long (${content.length} chars), truncating to 1900 chars`);
-                 content = content.substring(0, 1900) + '...';
-               }
-               children.push({
-                 object: 'block',
-                 type: 'paragraph',
-                 paragraph: { 
-                   rich_text: [{
-                     type: 'text',
-                     text: { content: content }
-                   }]
-                 }
-               });
-             } else {
-               // 複数行の段落（改行を保持） - 総文字数制限をチェック
-               const richTextItems = [];
-               let totalLength = 0;
-               
-               lines.forEach((line, lineIndex) => {
-                 // 改行文字も含めて文字数を計算
-                 const lineLength = line.length + (lineIndex < lines.length - 1 ? 1 : 0);
-                 
-                 if (totalLength + lineLength > 1900) {
-                   console.warn(`Multi-line paragraph is too long, truncating at line ${lineIndex + 1}`);
-                   return; // これ以上の行は追加しない
-                 }
-                 
-                 richTextItems.push({
-                   type: 'text',
-                   text: { content: line }
-                 });
-                 // 最後の行以外は改行を追加
-                 if (lineIndex < lines.length - 1) {
-                   richTextItems.push({
-                     type: 'text',
-                     text: { content: '\n' }
-                   });
-                 }
-                 
-                 totalLength += lineLength;
-               });
-               
-               if (richTextItems.length > 0) {
-                 children.push({
-                   object: 'block',
-                   type: 'paragraph',
-                   paragraph: { rich_text: richTextItems }
-                 });
-               }
-             }
-           });
-           
-           console.log(`Added ${children.length - originalChildrenCount} additional blocks to supplement structured content`);
-         } else {
-           console.log('Structured content appears to be sufficient after all, no additional blocks needed');
-         }
-       } else {
-         console.log('Structured content is sufficient, keeping original structure');
-       }
+      // 構造化コンテンツが存在する場合は重複を避けるため、メインテキストの補完は行わない
+      console.log('Structured content found, using structured content only to avoid duplication');
       
     } else {
       console.log('Step 6b: No structured content found, processing text and images separately...');
