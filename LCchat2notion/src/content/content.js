@@ -2678,43 +2678,9 @@ async function extractElementContent(element) {
           }, {});
           console.log('Structured content summary:', contentSummary);
           
-          // 構造化コンテンツからテキストを抽出して、メインテキストに統合（重複防止強化）
-          const structuredText = content.structuredContent
-            .filter(item => item.type === 'rich_text' && item.content && item.content.trim())
-            .map(item => item.content.trim())
-            .join('\n');
-            
-          if (structuredText && (!content.text || content.text.trim().length === 0)) {
-            content.text = structuredText;
-            console.log('Using structured text as main text:', content.text.substring(0, 100) + '...');
-          } else if (structuredText && content.text) {
-            // より厳密な重複チェック: 構造化テキストが既存テキストに含まれているか確認
-            const normalizedStructured = structuredText.replace(/\s+/g, ' ').trim().toLowerCase();
-            const normalizedExisting = content.text.replace(/\s+/g, ' ').trim().toLowerCase();
-            
-            // 類似度チェック：95%以上重複している場合のみ統合しない（より緩和）
-            const similarity = calculateTextSimilarity(normalizedStructured, normalizedExisting);
-            console.log('Text similarity check:', {
-              structuredLength: structuredText.length,
-              existingLength: content.text.length,
-              similarity: similarity,
-              threshold: 0.95
-            });
-            
-            // 構造化テキストの方が長い場合は優先して使用
-            if (structuredText.length > content.text.length * 1.5) {
-              content.text = structuredText;
-              console.log('Using longer structured text as main text');
-            } else if (similarity < 0.95 && 
-                !normalizedExisting.includes(normalizedStructured) && 
-                !normalizedStructured.includes(normalizedExisting)) {
-              // 十分に異なるテキストの場合のみ追加
-              content.text = content.text + '\n\n' + structuredText;
-              console.log('Combined main text with structured text');
-            } else {
-              console.log('Structured text is duplicate or too similar, skipping combination');
-            }
-          }
+          // 構造化コンテンツが存在する場合は重複を防ぐため、メインテキストを空にする
+          console.log('Structured content found, clearing main text to prevent duplication');
+          content.text = ''; // 構造化コンテンツが存在する場合はメインテキストを使用しない
           
           // 構造化コンテンツから画像を抽出して、メイン画像配列に統合
           const structuredImages = content.structuredContent
