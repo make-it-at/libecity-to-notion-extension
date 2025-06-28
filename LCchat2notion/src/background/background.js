@@ -688,9 +688,15 @@ async function saveToNotion(databaseId, content) {
       
       console.log(`Total structured text length: ${allText.length} characters`);
       
-      // 長文の場合はスマート分割を適用（閾値を1000文字に下げる）
-      if (allText.length >= 1000) {
-        console.log(`Long structured content detected (${allText.length} chars), applying smart splitting...`);
+      // ブロック制限チェック - 100ブロック以下なら省略せずに全文保存
+      const estimatedBlocks = structuredContent.length;
+      const shouldOptimize = estimatedBlocks > 80; // 80ブロック以上で最適化開始
+      
+      console.log(`Structured content analysis: ${estimatedBlocks} blocks estimated, optimization ${shouldOptimize ? 'enabled' : 'disabled'}`);
+      
+      // 長文かつブロック数が多い場合のみスマート分割を適用
+      if (allText.length >= 2000 && shouldOptimize) {
+        console.log(`Long structured content detected (${allText.length} chars, ${estimatedBlocks} blocks), applying smart splitting...`);
         
         const smartBlocks = createSmartTextBlocks(allText);
         if (smartBlocks.length > 1) {
@@ -748,8 +754,8 @@ async function saveToNotion(databaseId, content) {
         } else {
           console.log('Smart splitting failed for structured content, using default processing');
           
-          // 長文（1000文字以上）の場合のみ処理情報を記録
-          if (allText.length >= 1000) {
+          // 長文（3000文字以上）の場合のみ処理情報を記録
+          if (allText.length >= 3000) {
             longTextProcessingInfo = {
               originalLength: allText.length,
               processingMethod: 'structured_optimized'
@@ -2460,7 +2466,7 @@ async function getSettings() {
 // 長文を意味のある区切りで複数ブロックに分割する関数（スマート分割）
 function createRichTextBlocks(text) {
   const MAX_RICH_TEXT_LENGTH = 2000; // NotionのRich Textブロックの制限
-  const MIN_LONG_TEXT_LENGTH = 1000; // 長文と判定する閾値（1000文字に下げる）
+  const MIN_LONG_TEXT_LENGTH = 3000; // 長文と判定する閾値（3000文字に上げる）
   
   if (!text || text.length <= MAX_RICH_TEXT_LENGTH) {
     return [
