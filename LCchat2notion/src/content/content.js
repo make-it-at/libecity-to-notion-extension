@@ -1207,14 +1207,14 @@ function extractStructuredContent(element) {
   console.log(`Total text length in structured content: ${totalTextLength} characters`);
   
   let optimizedContent;
-  if (totalTextLength > 2000) {
-    console.log('Long text detected - applying smart chunking strategy');
-    // 長文の場合：文字数制限を考慮した分割
-    optimizedContent = optimizeStructuredContentForLongText(cleanedContent, 30); // より少ないブロック数
+  if (totalTextLength > 5000) {
+    console.log('Very long text detected - applying smart chunking strategy');
+    // 超長文の場合：文字数制限を考慮した分割
+    optimizedContent = optimizeStructuredContentForLongText(cleanedContent, 150);
   } else {
-    console.log('Normal text length - applying standard optimization');
-    // 通常の場合：標準最適化
-    optimizedContent = optimizeStructuredContentForLongText(cleanedContent, 95);
+    console.log('Normal text length - no optimization needed');
+    // 通常の場合：最適化なし（全文保存）
+    optimizedContent = cleanedContent; // 最適化を無効化
   }
   
   // デバッグ用：抽出された内容の概要をログ出力
@@ -4147,7 +4147,7 @@ function resetIcon(iconElement) {
 }
 
 // 長文投稿のブロック数最適化（文字数制限対応）
-function optimizeStructuredContentForLongText(structuredContent, maxBlocks = 95) {
+function optimizeStructuredContentForLongText(structuredContent, maxBlocks = 200) {
   console.log(`Optimizing structured content: ${structuredContent.length} blocks -> target: ${maxBlocks} blocks`);
   
   if (structuredContent.length <= maxBlocks) {
