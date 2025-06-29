@@ -694,8 +694,8 @@ async function saveToNotion(databaseId, content) {
       
       console.log(`Structured content analysis: ${estimatedBlocks} blocks estimated, optimization ${shouldOptimize ? 'enabled' : 'disabled'}`);
       
-      // 長文かつブロック数が多い場合のみスマート分割を適用
-      if (allText.length >= 2000 && shouldOptimize) {
+      // 長文の場合はスマート分割を適用（ブロック制限に関係なく）
+      if (allText.length >= 1500) {
         console.log(`Long structured content detected (${allText.length} chars, ${estimatedBlocks} blocks), applying smart splitting...`);
         
         const smartBlocks = createSmartTextBlocks(allText);
@@ -838,7 +838,7 @@ async function saveToNotion(databaseId, content) {
               totalImagesDetected++;
               console.log(`Processing image ${totalImagesDetected}: ${block.src}`);
               
-              // 画像ブロックを追加
+              // 画像ブロックを追加（基本的な検証のみ、Notion APIに実際に試させる）
               if (isValidNotionImageUrl(block.src)) {
                 children.push({
                   object: 'block',
@@ -853,14 +853,26 @@ async function saveToNotion(databaseId, content) {
                   }
                 });
                 validImagesProcessed++;
-                console.log(`Valid image added: ${validImagesProcessed}/${totalImagesDetected}`);
+                console.log(`Image added (will be validated by Notion API): ${validImagesProcessed}/${totalImagesDetected}`);
               } else {
-                console.warn('Invalid image URL skipped:', block.src);
+                console.warn('Invalid image URL format, adding as text link:', block.src);
                 imageFailures.push({
                   url: block.src,
                   alt: block.alt || '画像',
                   reason: '無効なURL形式（構造化コンテンツ）'
                 });
+                
+                // 画像の代わりにテキストリンクとして追加
+                if (block.alt || block.src) {
+                  currentParagraph.push({
+                    type: 'text',
+                    text: { 
+                      content: `[画像: ${block.alt || '画像'}]`,
+                      link: { url: block.src }
+                    },
+                    annotations: { color: 'gray' }
+                  });
+                }
               }
               break;
               
@@ -1053,28 +1065,48 @@ async function saveToNotion(databaseId, content) {
             totalImagesDetected++;
             console.log(`Processing image ${totalImagesDetected}: ${block.src}`);
             
-            // 画像ブロックを追加（事前検証を強化）
-            if (isValidNotionImageUrl(block.src) && isNotionCompatibleImageUrl(block.src)) {
-              children.push({
-                object: 'block',
-                type: 'image',
-                image: {
-                  type: 'external',
-                  external: { url: block.src },
-                  caption: block.alt ? [{
-                    type: 'text',
-                    text: { content: block.alt }
-                  }] : []
-                }
-              });
-              validImagesProcessed++;
-              console.log(`Valid image added: ${validImagesProcessed}/${totalImagesDetected}`);
+            // 画像ブロックを追加（基本的な検証のみ、Notion APIに実際に試させる）
+            if (isValidNotionImageUrl(block.src)) {
+              // 事前に明らかに問題のあるパターンのみチェック
+              if (isNotionCompatibleImageUrl(block.src)) {
+                children.push({
+                  object: 'block',
+                  type: 'image',
+                  image: {
+                    type: 'external',
+                    external: { url: block.src },
+                    caption: block.alt ? [{
+                      type: 'text',
+                      text: { content: block.alt }
+                    }] : []
+                  }
+                });
+                validImagesProcessed++;
+                console.log(`Image added (will be validated by Notion API): ${validImagesProcessed}/${totalImagesDetected}`);
+              } else {
+                console.log('Image URL has potential compatibility issues, but will try anyway:', block.src);
+                // 互換性に疑問があってもNotion APIに試させる
+                children.push({
+                  object: 'block',
+                  type: 'image',
+                  image: {
+                    type: 'external',
+                    external: { url: block.src },
+                    caption: block.alt ? [{
+                      type: 'text',
+                      text: { content: block.alt }
+                    }] : []
+                  }
+                });
+                validImagesProcessed++;
+                console.log(`Image added despite compatibility concerns: ${validImagesProcessed}/${totalImagesDetected}`);
+              }
             } else {
-              console.warn('Invalid or incompatible image URL skipped:', block.src);
+              console.warn('Invalid image URL format, adding as text link:', block.src);
               imageFailures.push({
                 url: block.src,
                 alt: block.alt || '画像',
-                reason: 'Notion APIと互換性のないURL形式'
+                reason: '無効なURL形式'
               });
               
               // 画像の代わりにテキストリンクとして追加
@@ -1165,27 +1197,71 @@ async function saveToNotion(databaseId, content) {
         childrenCount: children.length
       });
       
-      // 構造化コンテンツの文字数に基づいて重複防止判定
-      if (structuredTextContent.length > 100) {
-        console.log(`Sufficient structured content found (${structuredTextContent.length} chars), using structured content only to avoid duplication`);
+      // 構造化コンテンツの文字数とメインテキストの長さを考慮した重複防止判定
+      const structuredToMainRatio = text.length > 0 ? structuredTextContent.length / text.length : 0;
+      const useStructuredOnly = structuredTextContent.length > 4000 || 
+                                (structuredTextContent.length > 1000 && structuredToMainRatio > 0.7);
+      
+      if (useStructuredOnly) {
+        console.log(`Sufficient structured content found (${structuredTextContent.length} chars, ${(structuredToMainRatio * 100).toFixed(1)}% of main text), using structured content only to avoid duplication`);
       } else {
-        console.log(`Insufficient structured content (${structuredTextContent.length} chars), adding main text to ensure content availability`);
+        console.log(`Insufficient structured content (${structuredTextContent.length} chars, ${(structuredToMainRatio * 100).toFixed(1)}% of main text), adding main text to ensure content availability`);
         
         // 構造化コンテンツが少ない場合はメインテキストも追加
         if (text && text.trim() && text.trim() !== '（構造化コンテンツ）' && text.trim() !== '（構造化コンテンツのみ使用）') {
           console.log('Adding main text content to supplement structured content...');
           
-          // メインテキストを段落として追加
-          const mainTextBlocks = createRichTextBlocks(text);
-          mainTextBlocks.forEach(block => {
-            children.push({
-              object: 'block',
-              type: 'paragraph',
-              paragraph: { rich_text: [block] }
+          // 長文の場合はスマート分割を適用
+          if (text.length >= 1500) {
+            console.log(`Long main text detected (${text.length} chars), applying smart splitting...`);
+            
+            const smartBlocks = createSmartTextBlocks(text);
+            if (smartBlocks.length > 1) {
+              console.log(`Smart splitting successful: ${smartBlocks.length} semantic blocks created for main text`);
+              
+              // 長文処理情報を記録
+              longTextProcessingInfo = {
+                originalLength: text.length,
+                processingMethod: 'smart_split_main_text'
+              };
+              
+              // スマート分割されたブロックを段落として追加
+              smartBlocks.forEach(block => {
+                children.push({
+                  object: 'block',
+                  type: 'paragraph',
+                  paragraph: { rich_text: [block] }
+                });
+              });
+              
+              console.log(`Added ${smartBlocks.length} smart-split main text blocks to supplement structured content`);
+            } else {
+              console.log('Smart splitting failed for main text, using paragraph-based processing');
+              // メインテキストを段落として追加
+              const mainTextBlocks = createRichTextBlocks(text);
+              mainTextBlocks.forEach(block => {
+                children.push({
+                  object: 'block',
+                  type: 'paragraph',
+                  paragraph: { rich_text: [block] }
+                });
+              });
+              
+              console.log(`Added ${mainTextBlocks.length} main text blocks to supplement structured content`);
+            }
+          } else {
+            // 短いテキストは従来の処理
+            const mainTextBlocks = createRichTextBlocks(text);
+            mainTextBlocks.forEach(block => {
+              children.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: { rich_text: [block] }
+              });
             });
-          });
-          
-          console.log(`Added ${mainTextBlocks.length} main text blocks to supplement structured content`);
+            
+            console.log(`Added ${mainTextBlocks.length} main text blocks to supplement structured content`);
+          }
         }
       }
       
@@ -1824,20 +1900,25 @@ async function saveToNotion(databaseId, content) {
       const failedImageCount = totalImagesDetected - validImagesProcessed;
       console.log(`Adding image failure callout to Notion page (${failedImageCount} of ${totalImagesDetected} images failed)`);
       
+      // 失敗した画像のURLリンクを収集
+      const failedImageUrls = imageFailures
+        .filter(failure => failure.url && failure.url !== 'Multiple image URLs')
+        .map(failure => failure.url);
+      
       const calloutBlock = {
         object: 'block',
         type: 'callout',
         callout: {
           icon: {
             type: 'emoji',
-            emoji: '⚠️'
+            emoji: '📷'
           },
-          color: 'orange',
+          color: 'blue',
           rich_text: [
             {
               type: 'text',
               text: {
-                content: `画像保存エラー: ${totalImagesDetected}個中${failedImageCount}個の画像が保存できませんでした`
+                content: `画像情報: ${totalImagesDetected}個の画像が検出されました`
               },
               annotations: {
                 bold: true
@@ -1847,17 +1928,69 @@ async function saveToNotion(databaseId, content) {
               type: 'text',
               text: {
                 content: validImagesProcessed > 0 
-                  ? `\n\n${validImagesProcessed}個の画像は正常に保存されました。テキストと他の要素も正常に保存されています。`
-                  : '\n\nテキストと他の要素は正常に保存されています。画像が必要な場合は、手動でアップロードしてください。'
+                  ? `\n\n${validImagesProcessed}個の画像は正常に保存されました。${failedImageCount}個の画像はNotion APIの制限により直接埋め込めませんでしたが、以下のリンクからアクセスできます：`
+                  : `\n\n画像はNotion APIの制限により直接埋め込めませんでしたが、以下のリンクからアクセスできます：`
               }
             }
           ]
         }
       };
       
-      // 画像エラーコールアウトを最上部に挿入
-      pageData.children.unshift(calloutBlock);
-      console.log('Added image failure callout block to page');
+      // 失敗した画像のURLをリンクとして追加
+      if (failedImageUrls.length > 0) {
+        const imageLinksBlock = {
+          object: 'block',
+          type: 'bulleted_list_item',
+          bulleted_list_item: {
+            rich_text: [
+              {
+                type: 'text',
+                text: {
+                  content: '画像リンク:'
+                },
+                annotations: {
+                  bold: true
+                }
+              }
+            ]
+          }
+        };
+        
+        // 各画像URLをリンクとして追加
+        const imageUrlBlocks = failedImageUrls.map((url, index) => ({
+          object: 'block',
+          type: 'bulleted_list_item',
+          bulleted_list_item: {
+            rich_text: [
+              {
+                type: 'text',
+                text: {
+                  content: `画像 ${index + 1}: `,
+                }
+              },
+              {
+                type: 'text',
+                text: {
+                  content: url,
+                  link: {
+                    url: url
+                  }
+                },
+                annotations: {
+                  color: 'blue'
+                }
+              }
+            ]
+          }
+        }));
+        
+        // コールアウトの後に画像リンクブロックを追加
+        pageData.children.unshift(calloutBlock, imageLinksBlock, ...imageUrlBlocks);
+      } else {
+        pageData.children.unshift(calloutBlock);
+      }
+      
+      console.log('Added image info callout and links to page');
       
       // コールアウト追加後に再度長さをチェック
       if (pageData.children.length > maxBlocksPerPage) {
@@ -1974,22 +2107,26 @@ async function saveToNotion(databaseId, content) {
                  });
                }
                
-               // リトライ時もコールアウトを追加
+               // リトライ時もコールアウトと画像リンクを追加
                const failedImageCount = totalImagesDetected - validImagesProcessed;
+               const failedImageUrls = imageFailures
+                 .filter(failure => failure.url && failure.url !== 'Multiple image URLs')
+                 .map(failure => failure.url);
+               
                const calloutBlock = {
                  object: 'block',
                  type: 'callout',
                  callout: {
                    icon: {
                      type: 'emoji',
-                     emoji: '⚠️'
+                     emoji: '📷'
                    },
-                   color: 'orange',
+                   color: 'blue',
                    rich_text: [
                      {
                        type: 'text',
                        text: {
-                         content: `画像保存エラー: ${totalImagesDetected}個中${failedImageCount}個の画像が保存できませんでした`
+                         content: `画像情報: ${totalImagesDetected}個の画像が検出されました`
                        },
                        annotations: {
                          bold: true
@@ -1998,17 +2135,66 @@ async function saveToNotion(databaseId, content) {
                      {
                        type: 'text',
                        text: {
-                         content: validImagesProcessed > 0 
-                           ? `\n\n${validImagesProcessed}個の画像は正常に保存されました。テキストと他の要素も正常に保存されています。`
-                           : '\n\nテキストと他の要素は正常に保存されています。画像が必要な場合は、手動でアップロードしてください。'
+                         content: `\n\n画像はNotion APIの制限により直接埋め込めませんでしたが、以下のリンクからアクセスできます：`
                        }
                      }
                    ]
                  }
                };
                
-               // コールアウトをページの最上部に挿入
-               nonImagePageData.children.unshift(calloutBlock);
+               // 失敗した画像のURLをリンクとして追加
+               if (failedImageUrls.length > 0) {
+                 const imageLinksBlock = {
+                   object: 'block',
+                   type: 'bulleted_list_item',
+                   bulleted_list_item: {
+                     rich_text: [
+                       {
+                         type: 'text',
+                         text: {
+                           content: '画像リンク:'
+                         },
+                         annotations: {
+                           bold: true
+                         }
+                       }
+                     ]
+                   }
+                 };
+                 
+                 // 各画像URLをリンクとして追加
+                 const imageUrlBlocks = failedImageUrls.map((url, index) => ({
+                   object: 'block',
+                   type: 'bulleted_list_item',
+                   bulleted_list_item: {
+                     rich_text: [
+                       {
+                         type: 'text',
+                         text: {
+                           content: `画像 ${index + 1}: `,
+                         }
+                       },
+                       {
+                         type: 'text',
+                         text: {
+                           content: url,
+                           link: {
+                             url: url
+                           }
+                         },
+                         annotations: {
+                           color: 'blue'
+                         }
+                       }
+                     ]
+                   }
+                 }));
+                 
+                 // コールアウトと画像リンクを最上部に挿入
+                 nonImagePageData.children.unshift(calloutBlock, imageLinksBlock, ...imageUrlBlocks);
+               } else {
+                 nonImagePageData.children.unshift(calloutBlock);
+               }
                
                // 長文処理コールアウトが既に含まれているかチェックして重複を防ぐ
                const hasLongTextCallout = nonImagePageData.children.some(block => 
@@ -2770,14 +2956,14 @@ function isNotionCompatibleImageUrl(url) {
       return false;
     }
     
-    // 既知の問題のあるパターンを除外
+    // 既知の問題のあるパターンを除外（実際にテストして問題があるもののみ）
     const problematicPatterns = [
       // Google Docsの動的画像URL（keyパラメータ付き）
       /googleusercontent\.com.*docsz.*key=/i,
-      // 非常に長いクエリパラメータ
+      // 非常に長いクエリパラメータ（200文字以上）
       /\?[^&]{200,}/,
-      // 複雑なエンコードされたURL
-      /%[0-9A-F]{2}.*%[0-9A-F]{2}.*%[0-9A-F]{2}/i
+      // 非常に複雑なエンコードパターン（5つ以上の連続エンコード）
+      /%[0-9A-F]{2}.*%[0-9A-F]{2}.*%[0-9A-F]{2}.*%[0-9A-F]{2}.*%[0-9A-F]{2}/i
     ];
     
     const hasProblematicPattern = problematicPatterns.some(pattern => 
