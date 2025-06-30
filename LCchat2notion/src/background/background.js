@@ -675,31 +675,32 @@ async function saveToNotion(databaseId, content) {
       }, {});
       console.log('Structured content analysis:', contentAnalysis);
       
-      // 構造化コンテンツ全体のテキストを結合して長文判定
+      // 構造化コンテンツ全体のテキストを結合して長文判定（正しい構造に対応）
       const allText = structuredContent
-        .filter(block => block.type === 'paragraph' && block.rich_text)
-        .map(block => {
-          return block.rich_text
-            .filter(rt => rt.type === 'text' && rt.text && rt.text.content)
-            .map(rt => rt.text.content)
-            .join('');
-        })
+        .filter(block => block.type === 'rich_text' && block.content) // コンテンツスクリプト側の実際の構造に対応
+        .map(block => block.content)
         .join('\n');
       
       console.log(`Total structured text length: ${allText.length} characters`);
       
-      // ブロック制限チェック - 100ブロック以下なら省略せずに全文保存
+      // 構造化コンテンツでも文字数制限の事前チェックを実装
+      if (allText.length > 2000) {
+        console.log(`⚠️ 構造化コンテンツが文字数制限(2000文字)を超過: ${allText.length}文字 - 自動分割処理を実行`);
+      }
+      
+      // ブロック制限チェック - より多くのコンテンツを保持
       const estimatedBlocks = structuredContent.length;
-      const shouldOptimize = estimatedBlocks > 80; // 80ブロック以上で最適化開始
+      const shouldOptimize = estimatedBlocks > 400; // 400ブロック以上で最適化開始（大幅緩和で実質的に無効化）
       
       console.log(`Structured content analysis: ${estimatedBlocks} blocks estimated, optimization ${shouldOptimize ? 'enabled' : 'disabled'}`);
       
       // 長文の場合はスマート分割を適用（ブロック制限に関係なく）
-      if (allText.length >= 1500) {
+      if (allText.length >= 2000) { // 構造化コンテンツでも2000文字制限を適用
         console.log(`Long structured content detected (${allText.length} chars, ${estimatedBlocks} blocks), applying smart splitting...`);
         
-        const smartBlocks = createSmartTextBlocks(allText);
-        if (smartBlocks.length > 1) {
+        const smartBlocks = createSmartStructuredBlocks(structuredContent);
+        // スマート分割の成功条件を緩和（1ブロックでも構造化コンテンツを保持）
+        if (smartBlocks.length >= 1) {
           console.log(`Smart splitting successful: ${smartBlocks.length} semantic blocks created for structured content`);
           
                        // 長文処理情報を記録
@@ -708,45 +709,13 @@ async function saveToNotion(databaseId, content) {
                processingMethod: 'smart_split'
              };
           
-          // スマート分割されたブロックを段落として追加
+          // スマート分割されたブロックを直接追加（リンク情報保持済み）
           smartBlocks.forEach(block => {
             children.push({
               object: 'block',
               type: 'paragraph',
-              paragraph: { rich_text: [block] }
+              paragraph: block.paragraph
             });
-          });
-          
-          // 画像のみを別途処理
-          structuredContent.forEach((block, index) => {
-            if (block.type === 'image') {
-              totalImagesDetected++;
-              console.log(`Processing image ${totalImagesDetected}: ${block.src}`);
-              
-              if (isValidNotionImageUrl(block.src)) {
-                children.push({
-                  object: 'block',
-                  type: 'image',
-                  image: {
-                    type: 'external',
-                    external: { url: block.src },
-                    caption: block.alt ? [{
-                      type: 'text',
-                      text: { content: block.alt }
-                    }] : []
-                  }
-                });
-                validImagesProcessed++;
-                console.log(`Valid image added: ${validImagesProcessed}/${totalImagesDetected}`);
-              } else {
-                console.warn('Invalid image URL skipped:', block.src);
-                imageFailures.push({
-                  url: block.src,
-                  alt: block.alt || '画像',
-                  reason: '無効なURL形式（構造化コンテンツ）'
-                });
-              }
-            }
           });
           
           console.log(`Generated ${children.length} Notion blocks from smart-split structured content`);
@@ -754,30 +723,41 @@ async function saveToNotion(databaseId, content) {
         } else {
           console.log('Smart splitting failed for structured content, using default processing');
           
-          // 長文（3000文字以上）の場合のみ処理情報を記録
-          if (allText.length >= 3000) {
+          // 長文（2000文字以上）の場合のみ処理情報を記録
+          if (allText.length >= 2000) {
             longTextProcessingInfo = {
               originalLength: allText.length,
               processingMethod: 'structured_optimized'
             };
           }
           
-          // スマート分割失敗時は最適化された処理を使用
-          processStructuredContentOptimized();
+          // スマート分割失敗時でも、まずはデフォルト処理を試す
+          if (shouldOptimize) {
+            processStructuredContentOptimized();
+          } else {
+            processStructuredContentDefault();
+          }
         }
       } else {
         console.log('Structured content is not long enough for smart splitting, using default processing');
-        // 短いコンテンツは従来の処理
-        processStructuredContentDefault();
+        // ほとんどの場合はデフォルト処理を使用（コンテンツを最大限保持）
+        if (shouldOptimize) {
+          console.log('Extremely many blocks detected, applying minimal optimization');
+          processStructuredContentOptimized();
+        } else {
+          // デフォルト処理で全コンテンツを保持（推奨パス）
+          console.log('Using default processing to preserve maximum content');
+          processStructuredContentDefault();
+        }
       }
       
       function processStructuredContentOptimized() {
         console.log('Processing structured content with optimized method (reducing block count)');
         
-        // 長文構造化コンテンツの場合、ブロック数を大幅に削減
+        // 長文構造化コンテンツの場合、ブロック数を効率的に削減（より多くのコンテンツを保持）
         let currentParagraph = [];
         let consecutiveEmptyLines = 0;
-        const maxEmptyLines = 2; // 連続する空行は最大2つまで
+        const maxEmptyLines = 2; // より多くの空行を許可（さらに緩和）
         
         structuredContent.forEach((block, index) => {
           switch (block.type) {
@@ -884,6 +864,12 @@ async function saveToNotion(databaseId, content) {
                 if (lastItem && lastItem.text && lastItem.text.content) {
                   lastItem.text.content += '\n';
                 }
+              } else {
+                // 段落が空の場合でも、改行を保持するため簡単なスペースを追加
+                currentParagraph.push({
+                  type: 'text',
+                  text: { content: '\n' }
+                });
               }
               break;
               
@@ -922,12 +908,13 @@ async function saveToNotion(databaseId, content) {
               break;
           }
           
-          // 段落が長くなりすぎた場合は分割
+          // 段落が長くなりすぎた場合は分割（より寛容な制限）
           if (currentParagraph.length > 0) {
             const totalLength = currentParagraph.reduce((sum, item) => 
               sum + (item.text?.content?.length || 0), 0);
-              
-            if (totalLength > 1800) { // 1800文字で分割
+            
+            // より多くのコンテンツを統合するため、制限を大幅に緩和
+            if (currentParagraph.length > 98 || totalLength > 5000) { // rich_textアイテム数とサイズの両方を考慮（さらに緩和）
               children.push({
                 object: 'block',
                 type: 'paragraph',
@@ -947,17 +934,21 @@ async function saveToNotion(databaseId, content) {
           }
         });
         
-        console.log(`Generated ${children.length} optimized Notion blocks from structured content (reduced from potential ${structuredContent.length})`);
+        const reductionPercentage = ((structuredContent.length - children.length) / structuredContent.length * 100).toFixed(1);
+        console.log(`🔗 最適化統合完了: ${structuredContent.length} -> ${children.length} ブロック (${reductionPercentage}% 削減、${children.length} ブロックを保持)`);
       }
       
       function processStructuredContentDefault() {
-        console.log('Processing structured content with default method');
-        // 連続するテキストとリンクを1つの段落に統合
+        console.log('Processing structured content with default method (preserving more content)');
+        // 連続するテキストとリンクを1つの段落に統合（より多くのコンテンツを保持）
         let currentParagraph = [];
+        let consecutiveEmptyLines = 0;
+        const maxEmptyLines = 3; // デフォルト処理でも適度な空行を許可
         
         structuredContent.forEach((block, index) => {
         switch (block.type) {
           case 'text':
+            consecutiveEmptyLines = 0; // 空行カウンターをリセット
             // 旧形式のテキストを現在の段落に追加
             currentParagraph.push({
               type: 'text',
@@ -966,6 +957,7 @@ async function saveToNotion(databaseId, content) {
             break;
             
           case 'rich_text':
+            consecutiveEmptyLines = 0; // 空行カウンターをリセット
             // 新形式のrich_text（文字修飾付き）を現在の段落に追加
             const richTextItem = {
               type: 'text',
@@ -1136,6 +1128,14 @@ async function saveToNotion(databaseId, content) {
             break;
             
           case 'empty_line':
+            consecutiveEmptyLines++;
+            
+            // 連続する空行が制限を超えた場合はスキップ
+            if (consecutiveEmptyLines > maxEmptyLines) {
+              console.log(`Skipping excessive empty line (${consecutiveEmptyLines}) in default processing`);
+              break;
+            }
+            
             // 空白行の場合、現在の段落を完成させてから空の段落を追加
             if (currentParagraph.length > 0) {
               children.push({
@@ -1146,7 +1146,7 @@ async function saveToNotion(databaseId, content) {
               currentParagraph = [];
             }
             
-            // 空白行を空の段落として追加
+            // 空白行を空の段落として追加（制限内の場合のみ）
             children.push({
               object: 'block',
               type: 'paragraph',
@@ -1160,6 +1160,22 @@ async function saveToNotion(databaseId, content) {
               }
             });
             break;
+        }
+        
+        // 段落が長くなりすぎた場合は分割（デフォルト処理でも統合を促進）
+        if (currentParagraph.length > 0) {
+          const totalLength = currentParagraph.reduce((sum, item) => 
+            sum + (item.text?.content?.length || 0), 0);
+          
+          // デフォルト処理でも多くのコンテンツを統合
+          if (currentParagraph.length > 90 || totalLength > 3500) {
+            children.push({
+              object: 'block',
+              type: 'paragraph',
+              paragraph: { rich_text: currentParagraph }
+            });
+            currentParagraph = [];
+          }
         }
         
         // 最後のブロックの場合、残った段落を追加
@@ -1177,7 +1193,8 @@ async function saveToNotion(databaseId, content) {
         }
       });
       
-      console.log(`Generated ${children.length} Notion blocks from structured content`);
+      const reductionPercentage = ((structuredContent.length - children.length) / structuredContent.length * 100).toFixed(1);
+      console.log(`🔗 デフォルト処理完了: ${structuredContent.length} -> ${children.length} ブロック (${reductionPercentage}% 削減、${children.length} ブロックを保持)`);
       } // processStructuredContentDefaultの終了
       
       // 構造化コンテンツの品質チェック
@@ -1850,12 +1867,12 @@ async function saveToNotion(databaseId, content) {
     console.log(`Final image statistics: ${totalImagesDetected} detected, ${validImagesProcessed} successfully processed, ${imageFailures.length} total failures`);
     
     // 長いコンテンツの最終チェック（構造化コンテンツで最適化済みの場合は基本的に不要）
-    const maxBlocksPerPage = 95; // 安全マージンを設けて95ブロックまで
+    const maxBlocksPerPage = 200; // さらに実用的な制限値に変更（コンテンツスクリプトと統一）
     
     if (cleanedChildren.length > maxBlocksPerPage) {
       console.log(`Large content still detected after optimization: ${cleanedChildren.length} blocks. Applying final truncation.`);
       
-      // 最初の94ブロックのみ使用し、残りは省略メッセージに置き換え
+      // 最初の149ブロックのみ使用し、残りは省略メッセージに置き換え
       const truncatedChildren = cleanedChildren.slice(0, maxBlocksPerPage - 1);
       
       // 省略メッセージを追加
@@ -1872,7 +1889,7 @@ async function saveToNotion(databaseId, content) {
             {
               type: 'text',
               text: {
-                content: `極めて長い投稿のため、最初の${maxBlocksPerPage - 1}ブロックのみ表示しています。`
+                content: `🚨 極めて長い投稿のため最終省略実行\n\n最初の${maxBlocksPerPage - 1}ブロックのみ表示しています。`
               },
               annotations: {
                 bold: true
@@ -2679,6 +2696,139 @@ function createRichTextBlocks(text) {
   // スマート分割ができない場合は従来の方法
   console.log(`Falling back to character-based splitting`);
   return createCharacterBasedBlocks(text);
+}
+
+// 構造化コンテンツを意味のある区切りで分割する関数（リンク情報保持）
+function createSmartStructuredBlocks(structuredContent) {
+  const MAX_RICH_TEXT_LENGTH = 1900; // 安全マージンを含めた制限
+  const blocks = [];
+  
+  // セクション識別パターン
+  const sectionPatterns = [
+    /【[^】]+】/,     // 【タイトル】形式
+    /▼[^\n]+/,       // ▼タイトル形式  
+    /■[^\n]+/,       // ■タイトル形式
+    /◆[^\n]+/,       // ◆タイトル形式
+    /〜[^〜]+〜/,     // 〜タイトル〜形式
+    /[🦁👨👩🔸🌀✅️][：:]/  // 絵文字＋コロン
+  ];
+  
+  let currentSection = [];
+  let currentSectionCharCount = 0;
+  let sectionCount = 0;
+  
+  console.log(`Processing ${structuredContent.length} structured items for smart splitting with link preservation`);
+  
+  for (let i = 0; i < structuredContent.length; i++) {
+    const item = structuredContent[i];
+    
+    // セクション区切りを検出
+    let isNewSection = false;
+    if (item.type === 'rich_text' && item.content) {
+      for (const pattern of sectionPatterns) {
+        if (pattern.test(item.content)) {
+          isNewSection = true;
+          console.log(`🔍 New section detected: "${item.content.substring(0, 30)}..."`);
+          break;
+        }
+      }
+    }
+    
+    // 新しいセクションが始まる場合、現在のセクションを確定
+    if (isNewSection && currentSection.length > 0) {
+      const sectionBlock = createRichTextBlockFromStructured(currentSection);
+      if (sectionBlock) {
+        blocks.push(sectionBlock);
+        console.log(`✅ Created semantic block ${sectionCount + 1} with ${currentSection.length} items (${currentSectionCharCount} chars)`);
+      }
+      currentSection = [];
+      currentSectionCharCount = 0;
+      sectionCount++;
+    }
+    
+    // 文字数制限チェック
+    const itemCharCount = item.type === 'rich_text' ? (item.content?.length || 0) : 1;
+    
+    if (currentSectionCharCount + itemCharCount > MAX_RICH_TEXT_LENGTH && currentSection.length > 0) {
+      // 現在のセクションを確定して新しいセクションを開始
+      const sectionBlock = createRichTextBlockFromStructured(currentSection);
+      if (sectionBlock) {
+        blocks.push(sectionBlock);
+        console.log(`✅ Created semantic block ${sectionCount + 1} (char limit) with ${currentSection.length} items (${currentSectionCharCount} chars)`);
+      }
+      currentSection = [];
+      currentSectionCharCount = 0;
+      sectionCount++;
+    }
+    
+    // アイテムを現在のセクションに追加
+    currentSection.push(item);
+    currentSectionCharCount += itemCharCount;
+  }
+  
+  // 最後のセクションを処理
+  if (currentSection.length > 0) {
+    const sectionBlock = createRichTextBlockFromStructured(currentSection);
+    if (sectionBlock) {
+      blocks.push(sectionBlock);
+      console.log(`✅ Created final semantic block ${sectionCount + 1} with ${currentSection.length} items (${currentSectionCharCount} chars)`);
+    }
+  }
+  
+  console.log(`🎯 Created ${blocks.length} smart blocks from structured content with link preservation`);
+  return blocks;
+}
+
+// 構造化コンテンツからリッチテキストブロックを作成（リンク情報保持）
+function createRichTextBlockFromStructured(structuredItems, sectionLabel = '') {
+  if (!structuredItems || structuredItems.length === 0) return null;
+  
+  const richTextParts = [];
+  const maxRichTextElements = 100; // Notion APIの制限
+  
+  for (const item of structuredItems) {
+    if (richTextParts.length >= maxRichTextElements - 1) {
+      // 制限に達した場合は省略メッセージを追加
+      const remaining = structuredItems.length - structuredItems.indexOf(item);
+      richTextParts.push({
+        type: 'text',
+        text: { content: `\n[...残り${remaining}項目を省略...]` },
+        annotations: { italic: true, color: 'gray' }
+      });
+      break;
+    }
+    
+    if (item.type === 'rich_text') {
+      const richTextPart = {
+        type: 'text',
+        text: { content: item.content || '' },
+        annotations: item.annotations || {}
+      };
+      
+      // リンク情報を保持
+      if (item.link && item.link.url) {
+        richTextPart.text.link = item.link;
+        console.log(`🔗 Preserved link in smart block: ${item.link.url}`);
+      }
+      
+      richTextParts.push(richTextPart);
+    } else if (item.type === 'linebreak') {
+      richTextParts.push({
+        type: 'text',
+        text: { content: '\n' }
+      });
+    } else if (item.type === 'image') {
+      // 画像は別ブロックとして処理するため、ここではスキップ
+      // 後で画像統計に含める必要がある場合は、呼び出し元で処理
+      console.log(`🖼️ Image item skipped in text block (will be processed separately): ${item.src}`);
+    }
+  }
+  
+  return {
+    paragraph: {
+      rich_text: richTextParts
+    }
+  };
 }
 
 // 意味のある区切りでテキストを分割する関数

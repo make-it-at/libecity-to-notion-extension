@@ -3,6 +3,16 @@
 
 console.log('LibeCity to Notion Content Script loaded');
 
+// Notion API制限定数
+const NOTION_LIMITS = {
+  MAX_BLOCKS_PER_PAGE: 200,        // さらに多くのブロックを許可（大幅増加）
+  MAX_RICH_TEXT_PER_BLOCK: 98,     // 実際の制限は100だが安全マージン
+  MAX_CHARACTERS_PER_PAGE: 12000,  // 文字数制限をさらに大幅増加
+  MAX_CHARACTERS_PER_PARAGRAPH: 3000, // 段落あたりの制限をさらに増加
+  MAX_LINEBREAKS_PER_PARAGRAPH: 8,    // 段落内の改行制限をさらに緩和
+  AGGRESSIVE_LIMIT: 150            // 緊急時の制限も緩和
+};
+
 // libecity.com専用のセレクタ定義
 const SELECTORS = {
   // 投稿関連（article[data-id]を最優先に、つぶやき投稿も含む）
@@ -1210,7 +1220,7 @@ function extractStructuredContent(element) {
   if (totalTextLength > 5000) {
     console.log('Very long text detected - applying smart chunking strategy');
     // 超長文の場合：文字数制限を考慮した分割
-    optimizedContent = optimizeStructuredContentForLongText(cleanedContent, 150);
+          optimizedContent = optimizeStructuredContentForLongText(cleanedContent, NOTION_LIMITS.MAX_BLOCKS_PER_PAGE);
   } else {
     console.log('Normal text length - no optimization needed');
     // 通常の場合：最適化なし（全文保存）
@@ -3173,9 +3183,110 @@ async function handleNotionSave(postElement, iconElement) {
     // 保存処理中フラグをクリア
     iconElement.dataset.saving = 'false';
     
+    // 長文エラーの場合は詳細コールアウトも表示
+    if (error.message && error.message.includes('テキストが長すぎます')) {
+      showLongTextErrorCallout();
+    }
+    
     // エラー時のアイコン表示
     showErrorIcon(iconElement, error.message);
   }
+}
+
+// 長文エラー専用のコールアウト表示
+function showLongTextErrorCallout() {
+  // 既存のコールアウトがあれば削除
+  const existingCallout = document.getElementById('notion-longtext-error-callout');
+  if (existingCallout) {
+    existingCallout.remove();
+  }
+  
+  // コールアウト要素を作成
+  const callout = document.createElement('div');
+  callout.id = 'notion-longtext-error-callout';
+  callout.style.cssText = `
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    color: white;
+    padding: 16px 24px;
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+    z-index: 10001;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    max-width: 500px;
+    text-align: left;
+    animation: slideInFromTop 0.4s ease-out;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  `;
+  
+  callout.innerHTML = `
+    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;">
+      <div style="flex: 1;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <div style="font-size: 20px;">📝</div>
+          <div style="font-weight: 700; font-size: 16px;">長文エラー - 自動分割に失敗</div>
+        </div>
+        <div style="font-size: 13px; line-height: 1.5; opacity: 0.95; margin-bottom: 12px;">
+          この投稿は<strong>2000文字制限</strong>を超過していますが、自動分割処理が失敗しました。
+        </div>
+        <div style="background: rgba(255, 255, 255, 0.1); padding: 10px; border-radius: 6px; font-size: 12px; line-height: 1.4;">
+          <div style="font-weight: 600; margin-bottom: 6px;">💡 対処方法:</div>
+          <div>• 投稿を複数に分割して再度保存してください</div>
+          <div>• 不要な部分を削除して文字数を減らしてください</div>
+          <div>• 画像が多い場合は一部を削除してみてください</div>
+        </div>
+      </div>
+      <button id="notion-longtext-callout-close" style="
+        background: rgba(255, 255, 255, 0.2);
+        border: none;
+        color: white;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        transition: background 0.2s ease;
+        flex-shrink: 0;
+      " onmouseover="this.style.background='rgba(255, 255, 255, 0.3)'" 
+         onmouseout="this.style.background='rgba(255, 255, 255, 0.2)'">×</button>
+    </div>
+  `;
+  
+  // ページに追加
+  document.body.appendChild(callout);
+  
+  // 閉じるボタンのイベントリスナー
+  const closeButton = document.getElementById('notion-longtext-callout-close');
+  if (closeButton) {
+    closeButton.addEventListener('click', () => {
+      callout.style.animation = 'slideOutToTop 0.3s ease-in forwards';
+      setTimeout(() => {
+        if (callout.parentNode) {
+          callout.remove();
+        }
+      }, 300);
+    });
+  }
+  
+  // 12秒後に自動で消す（長文エラーは重要なので長めに表示）
+  setTimeout(() => {
+    if (callout.parentNode) {
+      callout.style.animation = 'slideOutToTop 0.3s ease-in forwards';
+      setTimeout(() => {
+        if (callout.parentNode) {
+          callout.remove();
+        }
+      }, 300);
+    }
+  }, 12000);
 }
 
 // 画像保存失敗時のコールアウト表示
@@ -4073,6 +4184,12 @@ async function handleTweetSave(tweetElement, iconElement) {
     
   } catch (error) {
     console.error('Tweet save failed:', error);
+    
+    // 長文エラーの場合は詳細コールアウトも表示
+    if (error.message && error.message.includes('テキストが長すぎます')) {
+      showLongTextErrorCallout();
+    }
+    
     showErrorIcon(iconElement, error.message);
   } finally {
     // 保存処理中フラグをクリア
@@ -4107,18 +4224,75 @@ function showSuccessIcon(iconElement) {
 function showErrorIcon(iconElement, errorMessage) {
   iconElement.style.background = '#dc3545';
   iconElement.style.color = 'white';
+  
+  // エラーの種類に応じて表示内容を変更
+  let displayText = '保存失敗';
+  let tooltipText = errorMessage || '不明なエラーが発生しました';
+  
+  if (errorMessage && errorMessage.includes('テキストが長すぎます')) {
+    displayText = '長文エラー';
+    tooltipText = '文字数制限(2000文字)を超過しています。自動分割処理が失敗しました。';
+  } else if (errorMessage && errorMessage.includes('データベース設定')) {
+    displayText = 'DB設定エラー';
+    tooltipText = 'データベースのプロパティ設定に問題があります。新しいデータベースを作成してください。';
+  } else if (errorMessage && errorMessage.includes('画像の保存に失敗')) {
+    displayText = '画像エラー';
+    tooltipText = '画像の保存に失敗しましたが、テキストは正常に保存されました。';
+  } else if (errorMessage && errorMessage.includes('ネットワークエラー')) {
+    displayText = '通信エラー';
+    tooltipText = 'ネットワーク接続に問題があります。しばらく時間をおいて再試行してください。';
+  } else if (errorMessage && errorMessage.includes('Database ID')) {
+    displayText = 'DB未設定';
+    tooltipText = 'Notionデータベースが設定されていません。拡張機能の設定を確認してください。';
+  }
+  
   iconElement.innerHTML = `
     <svg viewBox="0 0 24 24" width="14" height="14">
       <path fill="white" d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
     </svg>
-    <span>保存失敗</span>
+    <span>${displayText}</span>
+    <div class="notion-icon-tooltip" style="
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      white-space: nowrap;
+      max-width: 250px;
+      white-space: normal;
+      text-align: center;
+      z-index: 10000;
+      margin-bottom: 5px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    ">${tooltipText}</div>
   `;
   
-  // エラーの詳細はコンソールのみに出力（ユーザーには表示しない）
+  // ホバー時にツールチップを表示
+  iconElement.addEventListener('mouseenter', () => {
+    const tooltip = iconElement.querySelector('.notion-icon-tooltip');
+    if (tooltip) {
+      tooltip.style.display = 'block';
+    }
+  });
+  
+  iconElement.addEventListener('mouseleave', () => {
+    const tooltip = iconElement.querySelector('.notion-icon-tooltip');
+    if (tooltip) {
+      tooltip.style.display = 'none';
+    }
+  });
+  
+  // エラーの詳細はコンソールにも出力
   console.error('Save error details:', errorMessage);
   
-  // 5秒後に元に戻す
-  setTimeout(() => resetIcon(iconElement), 5000);
+  // 長文エラーの場合は少し長めに表示（8秒）、その他は5秒
+  const displayTime = displayText === '長文エラー' ? 8000 : 5000;
+  setTimeout(() => resetIcon(iconElement), displayTime);
 }
 
 function showAlreadySavedIcon(iconElement) {
@@ -4146,12 +4320,13 @@ function resetIcon(iconElement) {
   `;
 }
 
-// 長文投稿のブロック数最適化（文字数制限対応）
-function optimizeStructuredContentForLongText(structuredContent, maxBlocks = 200) {
-  console.log(`Optimizing structured content: ${structuredContent.length} blocks -> target: ${maxBlocks} blocks`);
+// 長文投稿のブロック数最適化（改良版）
+function optimizeStructuredContentForLongText(structuredContent, maxBlocks = NOTION_LIMITS.MAX_BLOCKS_PER_PAGE) {
+  console.log(`🔄 長文最適化開始: ${structuredContent.length} ブロック -> 目標: ${maxBlocks} ブロック`);
   
+  // 基本制限内なら最適化不要
   if (structuredContent.length <= maxBlocks) {
-    console.log('Content is within block limit, no optimization needed');
+    console.log('✅ ブロック数制限内のため最適化不要');
     return structuredContent;
   }
   
@@ -4160,132 +4335,277 @@ function optimizeStructuredContentForLongText(structuredContent, maxBlocks = 200
     .filter(item => item.type === 'rich_text')
     .reduce((total, item) => total + (item.content?.length || 0), 0);
   
-  console.log(`Total text length: ${totalTextLength} characters`);
+  console.log(`📊 総文字数: ${totalTextLength.toLocaleString()} 文字`);
   
-  // 文字数制限を超える場合の特別処理
-  if (totalTextLength > 2000) {
-    console.log('Text exceeds 2000 character limit - applying aggressive optimization');
-    return optimizeForCharacterLimit(structuredContent, 2000);
+  // 超長文の場合は文字数制限を優先
+  if (totalTextLength > NOTION_LIMITS.MAX_CHARACTERS_PER_PAGE) {
+    console.log(`⚠️ 文字数制限超過 (${NOTION_LIMITS.MAX_CHARACTERS_PER_PAGE.toLocaleString()}文字) - 文字数最適化を実行`);
+    return optimizeForCharacterLimit(structuredContent, NOTION_LIMITS.MAX_CHARACTERS_PER_PAGE);
   }
   
-  // Step 1: 空白行を除去
-  const withoutEmptyLines = structuredContent.filter(item => item.type !== 'empty_line');
-  console.log(`After removing empty lines: ${withoutEmptyLines.length} blocks (removed ${structuredContent.length - withoutEmptyLines.length} empty lines)`);
+  // 段階的最適化を実行
+  return performStepwiseOptimization(structuredContent, maxBlocks, totalTextLength);
+}
+
+// 段階的最適化処理（改良版）
+function performStepwiseOptimization(structuredContent, maxBlocks, totalTextLength) {
+  console.log(`🎯 段階的最適化開始: ${structuredContent.length} -> ${maxBlocks} ブロック`);
   
-  if (withoutEmptyLines.length <= maxBlocks) {
-    console.log('Content fits after removing empty lines');
-    return withoutEmptyLines;
+  // Step 1: 軽量化（空白行・連続改行の除去）
+  let currentContent = cleanupUnnecessaryElements(structuredContent);
+  console.log(`📝 Step 1完了: ${currentContent.length} ブロック (${structuredContent.length - currentContent.length} 個削除)`);
+  
+  if (currentContent.length <= maxBlocks) {
+    console.log('✅ Step 1で制限内に収まりました');
+    return currentContent;
   }
   
-  // Step 2: 連続する改行を統合
-  const withReducedLinebreaks = [];
-  let consecutiveLinebreaks = 0;
+  // Step 2: スマート統合（テキストブロックの結合）
+  currentContent = smartCombineTextBlocks(currentContent, maxBlocks);
+  console.log(`🔗 Step 2完了: ${currentContent.length} ブロック`);
   
-  for (const item of withoutEmptyLines) {
-    if (item.type === 'linebreak') {
-      consecutiveLinebreaks++;
-      if (consecutiveLinebreaks === 1) {
-        withReducedLinebreaks.push(item);
-      }
-      // 2つ目以降の連続する改行は無視
-    } else {
-      consecutiveLinebreaks = 0;
-      withReducedLinebreaks.push(item);
-    }
+  if (currentContent.length <= maxBlocks) {
+    console.log('✅ Step 2で制限内に収まりました');
+    return currentContent;
   }
   
-  console.log(`After reducing linebreaks: ${withReducedLinebreaks.length} blocks (removed ${withoutEmptyLines.length - withReducedLinebreaks.length} extra linebreaks)`);
+  // Step 3: 選択的省略（重要度に基づく削減）
+  currentContent = selectiveContentReduction(currentContent, maxBlocks);
+  console.log(`✂️ Step 3完了: ${currentContent.length} ブロック`);
   
-  if (withReducedLinebreaks.length <= maxBlocks) {
-    console.log('Content fits after reducing linebreaks');
-    return withReducedLinebreaks;
+  if (currentContent.length <= maxBlocks) {
+    console.log('✅ Step 3で制限内に収まりました');
+    return currentContent;
   }
   
-  // Step 3: テキストブロックを段落単位で統合
-  const optimizedContent = [];
-  let currentParagraph = [];
-  let blockCount = 0;
-  const maxRichTextPerParagraph = 90; // 段落あたりのrich_text要素制限
-  
-  for (let i = 0; i < withReducedLinebreaks.length; i++) {
-    const item = withReducedLinebreaks[i];
+  // Step 4: 緊急省略（強制的な制限適用）
+  console.warn('⚠️ 緊急省略を実行します');
+  return emergencyTruncation(currentContent, maxBlocks);
+}
+
+// Step 1: 不要要素の除去
+function cleanupUnnecessaryElements(content) {
+  return content.filter(item => {
+    // 空白行を除去
+    if (item.type === 'empty_line') return false;
     
-    // 画像は常に独立したブロックとして保持
-    if (item.type === 'image') {
-      // 現在の段落があれば先にコミット
-      if (currentParagraph.length > 0) {
-        optimizedContent.push(createCombinedTextBlock(currentParagraph));
-        currentParagraph = [];
-        blockCount++;
+    // 空のテキストブロックを除去
+    if (item.type === 'rich_text' && (!item.content || item.content.trim() === '')) return false;
+    
+    return true;
+  }).reduce((acc, item, index, array) => {
+    // 連続する改行を統合
+    if (item.type === 'linebreak') {
+      const prevItem = acc[acc.length - 1];
+      if (prevItem && prevItem.type === 'linebreak') {
+        return acc; // 連続する改行をスキップ
       }
-      
-      optimizedContent.push(item);
-      blockCount++;
+    }
+    
+    acc.push(item);
+    return acc;
+  }, []);
+}
+
+// Step 2: テキストブロックのスマート統合（改良版）
+function smartCombineTextBlocks(content, maxBlocks) {
+  const combined = [];
+  let currentParagraph = [];
+  let currentCharCount = 0;
+  const maxCharsPerBlock = NOTION_LIMITS.MAX_CHARACTERS_PER_PARAGRAPH;
+  const maxRichTextPerBlock = NOTION_LIMITS.MAX_RICH_TEXT_PER_BLOCK;
+  
+  console.log(`🔗 スマート統合開始: ${content.length} アイテム -> 目標: ${maxBlocks} ブロック以下`);
+  
+  for (const item of content) {
+    // 画像は独立して保持
+    if (item.type === 'image') {
+      // 現在の段落をコミット
+      if (currentParagraph.length > 0) {
+        combined.push(createCombinedTextBlock(currentParagraph));
+        currentParagraph = [];
+        currentCharCount = 0;
+      }
+      combined.push(item);
       continue;
     }
     
-    // テキストと改行は段落として蓄積
+    // テキスト・改行の処理
     if (item.type === 'rich_text' || item.type === 'linebreak') {
-      currentParagraph.push(item);
-      
-      // 段落内のrich_text要素数が制限に近づいたら段落をコミット
+      const itemCharCount = item.type === 'rich_text' ? (item.content?.length || 0) : 1;
       const richTextCount = currentParagraph.filter(p => p.type === 'rich_text').length;
-      if (richTextCount >= maxRichTextPerParagraph) {
-        optimizedContent.push(createCombinedTextBlock(currentParagraph));
-        currentParagraph = [];
-        blockCount++;
-      }
+      const hasLink = item.type === 'rich_text' && item.link && item.link.url;
       
-      // ブロック制限に近づいたら、現在の段落をコミット
-      if (blockCount >= maxBlocks - 10) { // 安全マージン
-        if (currentParagraph.length > 0) {
-          optimizedContent.push(createCombinedTextBlock(currentParagraph));
-          currentParagraph = [];
-          blockCount++;
+      // 制限チェック
+      const wouldExceedChars = currentCharCount + itemCharCount > maxCharsPerBlock;
+      const wouldExceedRichText = richTextCount >= maxRichTextPerBlock;
+      
+      if ((wouldExceedChars || wouldExceedRichText) && currentParagraph.length > 0) {
+        // リンクを含むアイテムの場合は警告を出力
+        if (hasLink) {
+          console.warn(`🔗 リンク付きテキストがブロック制限により分割されます: "${item.content?.substring(0, 30)}..." -> ${item.link.url}`);
         }
         
-        // 制限に達したら残りを省略メッセージに置き換え
-        if (blockCount >= maxBlocks - 1) {
-          const remainingItems = withReducedLinebreaks.length - i - 1;
-          if (remainingItems > 0) {
-            const truncationBlock = {
-              type: 'callout',
-              content: `[長文のため省略] 残り${remainingItems}個のコンテンツブロックが省略されました。完全な内容は元の投稿をご確認ください。`,
-              emoji: '📄',
-              color: 'gray'
-            };
-            optimizedContent.push(truncationBlock);
-          }
-          break;
-        }
+        // 現在の段落をコミット
+        combined.push(createCombinedTextBlock(currentParagraph));
+        currentParagraph = [];
+        currentCharCount = 0;
       }
+      
+      currentParagraph.push(item);
+      currentCharCount += itemCharCount;
     }
   }
   
   // 最後の段落をコミット
-  if (currentParagraph.length > 0 && blockCount < maxBlocks) {
-    optimizedContent.push(createCombinedTextBlock(currentParagraph));
+  if (currentParagraph.length > 0) {
+    combined.push(createCombinedTextBlock(currentParagraph));
   }
   
-  console.log(`Final optimization result: ${optimizedContent.length} blocks (reduced from ${structuredContent.length})`);
-  return optimizedContent;
+  console.log(`🔗 スマート統合完了: ${content.length} -> ${combined.length} ブロック (${content.length - combined.length} ブロック削減)`);
+  return combined;
+}
+
+// Step 3: 選択的コンテンツ削減（改良版）
+function selectiveContentReduction(content, maxBlocks) {
+  console.log(`✂️ 選択的削減開始: ${content.length} -> ${maxBlocks} ブロック`);
+  
+  // より多くのコンテンツを保持するため、削減率を調整
+  const targetBlocks = Math.max(maxBlocks - 2, Math.floor(content.length * 0.85)); // 85%保持を目標
+  
+  // 重要度スコアを計算
+  const scoredContent = content.map((item, index) => ({
+    item,
+    index,
+    score: calculateImportanceScore(item, index, content.length)
+  }));
+  
+  // スコア順にソート（高い順）
+  scoredContent.sort((a, b) => b.score - a.score);
+  
+  // 上位アイテムを選択（元の順序を保持）
+  const selectedItems = scoredContent
+    .slice(0, targetBlocks) // より多くのアイテムを選択
+    .sort((a, b) => a.index - b.index)
+    .map(item => item.item);
+  
+  console.log(`✂️ 選択的削減: ${content.length} -> ${selectedItems.length} ブロック保持 (${content.length - selectedItems.length} ブロック省略)`);
+  
+  // 省略された内容の統計
+  const omittedCount = content.length - selectedItems.length;
+  if (omittedCount > 0) {
+    const omittedText = content
+      .filter(item => item.type === 'rich_text')
+      .slice(-5) // 最後の5つのテキストブロック
+      .map(item => item.content)
+      .join(' ')
+      .substring(0, 300);
+    
+    selectedItems.push(createTruncationMessage(omittedCount, omittedText, 'selective'));
+  }
+  
+  return selectedItems;
+}
+
+// 重要度スコアの計算（改良版）
+function calculateImportanceScore(item, index, totalLength) {
+  let score = 0;
+  
+  // 位置による重み（冒頭と末尾を重視、中央部分も考慮）
+  const positionRatio = index / totalLength;
+  if (positionRatio < 0.4) score += 12; // 冒頭40%をより重視
+  if (positionRatio > 0.6) score += 8;  // 末尾40%も重視
+  if (positionRatio >= 0.2 && positionRatio <= 0.8) score += 3; // 中央部分も保持
+  
+  // コンテンツタイプによる重み（改良版）
+  switch (item.type) {
+    case 'image':
+      score += 20; // 画像をさらに高優先度に
+      break;
+    case 'rich_text':
+      // テキスト長による基本スコア（上限を上げる）
+      score += item.content?.length ? Math.min(item.content.length / 80, 15) : 0;
+      // 装飾があるテキストは重要（重み増加）
+      if (item.annotations?.bold) score += 5;
+      if (item.annotations?.italic) score += 3;
+      if (item.link && item.link.url) score += 10; // リンクは非常に重要なので重みを増加
+      // 特定のキーワードがある場合は重要度アップ
+      if (item.content?.includes('【') || item.content?.includes('▼')) score += 4;
+      break;
+    case 'linebreak':
+      score += 2; // 改行も少し重要度を上げる
+      break;
+  }
+  
+  return score;
+}
+
+// Step 4: 緊急省略
+function emergencyTruncation(content, maxBlocks) {
+  const truncated = content.slice(0, maxBlocks - 1);
+  const omittedCount = content.length - truncated.length;
+  
+  if (omittedCount > 0) {
+    const omittedText = content
+      .filter(item => item.type === 'rich_text')
+      .slice(-3)
+      .map(item => item.content)
+      .join(' ')
+      .substring(0, 200);
+    
+    truncated.push(createTruncationMessage(omittedCount, omittedText, 'emergency'));
+  }
+  
+  return truncated;
+}
+
+// 省略メッセージの作成
+function createTruncationMessage(omittedCount, previewText, type) {
+  const isEmergency = type === 'emergency';
+  
+  return {
+    type: 'callout',
+    callout: {
+      rich_text: [{
+        type: 'text',
+        text: { 
+          content: isEmergency 
+            ? `🚨 緊急省略実行\n\n非常に長いコンテンツのため、${omittedCount}個のブロックが省略されました。\n\n省略内容の一部:\n"${previewText}..."\n\n📖 完全な内容は元の投稿をご確認ください。`
+            : `📄 長文のため選択的省略\n\n重要度の低い${omittedCount}個のブロックが省略されました。\n\n省略内容の一部:\n"${previewText}..."\n\n📖 完全な内容は元の投稿をご確認ください。`
+        },
+        annotations: { 
+          italic: true,
+          bold: isEmergency
+        }
+      }],
+      icon: { emoji: isEmergency ? '🚨' : '📄' },
+      color: isEmergency ? 'red_background' : 'yellow_background'
+    }
+  };
 }
 
 // 文字数制限に対応した最適化処理
-function optimizeForCharacterLimit(structuredContent, maxCharacters = 2000) {
+function optimizeForCharacterLimit(structuredContent, maxCharacters = NOTION_LIMITS.MAX_CHARACTERS_PER_PAGE) {
   console.log(`Optimizing for character limit: ${maxCharacters} characters`);
   
   const optimizedContent = [];
   let currentCharCount = 0;
   let currentParagraph = [];
   let currentParagraphCharCount = 0;
-  const maxParagraphLength = 800; // 1段落あたりの文字数制限
+  const maxParagraphLength = NOTION_LIMITS.MAX_CHARACTERS_PER_PARAGRAPH; // 1段落あたりの文字数制限を増加
+  const maxBlocks = NOTION_LIMITS.MAX_BLOCKS_PER_PAGE; // ブロック数制限も考慮
   
   for (let i = 0; i < structuredContent.length; i++) {
     const item = structuredContent[i];
     
     // 画像は文字数にカウントしない
     if (item.type === 'image') {
+      // ブロック数制限をチェック
+      if (optimizedContent.length >= maxBlocks - 2) {
+        console.log(`Skipping image due to block limit at character optimization`);
+        continue;
+      }
+      
       // 現在の段落があれば先にコミット
       if (currentParagraph.length > 0) {
         optimizedContent.push(createCombinedTextBlock(currentParagraph));
@@ -4297,9 +4617,18 @@ function optimizeForCharacterLimit(structuredContent, maxCharacters = 2000) {
       continue;
     }
     
-    // 空白行と改行は文字数にカウントしない
-    if (item.type === 'empty_line' || item.type === 'linebreak') {
-      currentParagraph.push(item);
+    // 空白行と改行は文字数にカウントしない（ただし制限する）
+    if (item.type === 'empty_line') {
+      // 空白行は完全に除去
+      continue;
+    }
+    
+    if (item.type === 'linebreak') {
+      // 改行は段落内で制限
+      const linebreakCount = currentParagraph.filter(p => p.type === 'linebreak').length;
+             if (linebreakCount < NOTION_LIMITS.MAX_LINEBREAKS_PER_PARAGRAPH) { // 段落内の改行を制限
+        currentParagraph.push(item);
+      }
       continue;
     }
     
@@ -4316,27 +4645,65 @@ function optimizeForCharacterLimit(structuredContent, maxCharacters = 2000) {
           optimizedContent.push(createCombinedTextBlock(currentParagraph));
         }
         
+        // 残りテキストのサンプルを取得
+        const remainingText = structuredContent.slice(i)
+          .filter(item => item.type === 'rich_text')
+          .map(item => item.content)
+          .join(' ')
+          .substring(0, 150);
+        
         // 省略メッセージを追加
         const remainingItems = structuredContent.length - i;
         const truncationBlock = {
-          type: 'paragraph',
-          rich_text: [{
-            type: 'text',
-            text: { content: `\n[長文のため省略] 残り約${remainingItems}個のコンテンツが省略されました。完全な内容は元の投稿をご確認ください。` },
-            annotations: { italic: true, color: 'gray' }
-          }]
+          type: 'callout',
+          callout: {
+            rich_text: [{
+              type: 'text',
+              text: { 
+                content: `[文字数制限のため省略] 残り約${remainingItems}個のコンテンツが省略されました。\n\n省略されたテキストの一部: "${remainingText}..."\n\n完全な内容は元の投稿をご確認ください。` 
+              },
+              annotations: { italic: true }
+            }],
+            icon: { emoji: '📝' },
+            color: 'yellow_background'
+          }
         };
         optimizedContent.push(truncationBlock);
         break;
       }
       
       // 段落の文字数制限チェック
-      if (currentParagraphCharCount + itemLength > maxParagraphLength) {
+      if (currentParagraphCharCount + itemLength > maxParagraphLength && currentParagraph.length > 0) {
         // 現在の段落をコミット
-        if (currentParagraph.length > 0) {
-          optimizedContent.push(createCombinedTextBlock(currentParagraph));
-          currentParagraph = [];
-          currentParagraphCharCount = 0;
+        optimizedContent.push(createCombinedTextBlock(currentParagraph));
+        currentParagraph = [];
+        currentParagraphCharCount = 0;
+        
+        // ブロック数制限をチェック
+        if (optimizedContent.length >= maxBlocks - 1) {
+          const remainingItems = structuredContent.length - i;
+          const remainingText = structuredContent.slice(i)
+            .filter(item => item.type === 'rich_text')
+            .map(item => item.content)
+            .join(' ')
+            .substring(0, 150);
+          
+          const truncationBlock = {
+            type: 'callout',
+            callout: {
+              rich_text: [{
+                type: 'text',
+                text: { 
+                  content: `[ブロック数制限のため省略] 残り約${remainingItems}個のコンテンツが省略されました。\n\n省略されたテキストの一部: "${remainingText}..."\n\n完全な内容は元の投稿をご確認ください。` 
+                },
+                annotations: { italic: true }
+              }],
+              icon: { emoji: '📄' },
+              color: 'red_background'
+            }
+          };
+          optimizedContent.push(truncationBlock);
+          break;
         }
       }
       
@@ -4348,7 +4715,7 @@ function optimizeForCharacterLimit(structuredContent, maxCharacters = 2000) {
   }
   
   // 最後の段落をコミット
-  if (currentParagraph.length > 0) {
+  if (currentParagraph.length > 0 && optimizedContent.length < maxBlocks) {
     optimizedContent.push(createCombinedTextBlock(currentParagraph));
   }
   
@@ -4359,12 +4726,12 @@ function optimizeForCharacterLimit(structuredContent, maxCharacters = 2000) {
 // 複数のテキスト要素を1つのブロックに統合（Notion制限対応）
 function createCombinedTextBlock(textItems) {
   const richTextParts = [];
-  const maxRichTextElements = 90; // Notionの制限は100だが安全マージン
+  const maxRichTextElements = NOTION_LIMITS.MAX_RICH_TEXT_PER_BLOCK; // Notionの制限は100だが安全マージン
   let currentTextContent = '';
   let currentAnnotations = {};
   let currentLink = null;
   
-  // 連続する同じ装飾のテキストを結合
+  // 連続する同じ装飾のテキストを結合（リンク情報を正しく保持）
   for (const item of textItems) {
     if (item.type === 'rich_text') {
       const sameAnnotations = JSON.stringify(item.annotations || {}) === JSON.stringify(currentAnnotations);
@@ -4377,19 +4744,29 @@ function createCombinedTextBlock(textItems) {
         // 異なる装飾・リンクの場合は前の要素を追加して新しい要素を開始
         if (currentTextContent) {
           if (richTextParts.length < maxRichTextElements) {
-            richTextParts.push({
+            const textPart = {
               type: 'text',
               text: {
-                content: currentTextContent,
-                link: currentLink
+                content: currentTextContent
               },
               annotations: currentAnnotations
-            });
+            };
+            
+            // リンク情報がある場合のみlinkプロパティを追加
+            if (currentLink && currentLink.url) {
+              textPart.text.link = currentLink;
+            }
+            
+            richTextParts.push(textPart);
+            console.log(`Added text part with link: ${currentLink ? 'YES' : 'NO'}, content: "${currentTextContent.substring(0, 30)}..."`);
           } else {
-            // 制限に達した場合、最後の要素に追加
+            // 制限に達した場合、最後の要素に追加（リンク情報は失われる可能性があることを警告）
             if (richTextParts.length > 0) {
               const lastPart = richTextParts[richTextParts.length - 1];
               lastPart.text.content += ' ' + currentTextContent;
+              if (currentLink && currentLink.url) {
+                console.warn(`⚠️ リンク情報が失われる可能性: "${currentTextContent.substring(0, 30)}..." -> ${currentLink.url}`);
+              }
             }
           }
         }
@@ -4404,21 +4781,31 @@ function createCombinedTextBlock(textItems) {
     }
   }
   
-  // 最後の要素を追加
+  // 最後の要素を追加（リンク情報を正しく保持）
   if (currentTextContent) {
     if (richTextParts.length < maxRichTextElements) {
-      richTextParts.push({
+      const textPart = {
         type: 'text',
         text: {
-          content: currentTextContent,
-          link: currentLink
+          content: currentTextContent
         },
         annotations: currentAnnotations
-      });
+      };
+      
+      // リンク情報がある場合のみlinkプロパティを追加
+      if (currentLink && currentLink.url) {
+        textPart.text.link = currentLink;
+      }
+      
+      richTextParts.push(textPart);
+      console.log(`Added final text part with link: ${currentLink ? 'YES' : 'NO'}, content: "${currentTextContent.substring(0, 30)}..."`);
     } else if (richTextParts.length > 0) {
-      // 制限に達した場合、最後の要素に追加
+      // 制限に達した場合、最後の要素に追加（リンク情報は失われる可能性があることを警告）
       const lastPart = richTextParts[richTextParts.length - 1];
       lastPart.text.content += ' ' + currentTextContent;
+      if (currentLink && currentLink.url) {
+        console.warn(`⚠️ 最終要素でリンク情報が失われる可能性: "${currentTextContent.substring(0, 30)}..." -> ${currentLink.url}`);
+      }
     }
   }
   
