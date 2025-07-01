@@ -3403,19 +3403,45 @@ function addNotionIconStyles() {
   style.textContent = `
     .notion-save-icon {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      position: relative;
     }
     
-
+    .notion-icon-tooltip {
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.4;
+      max-width: 280px;
+      min-width: 200px;
+      width: max-content;
+      text-align: right;
+      z-index: 10000;
+      margin-top: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      word-break: break-word;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      white-space: normal;
+      hyphens: auto;
+      pointer-events: none;
+    }
     
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
     
-    @keyframes slideInFromTop {
+    @keyframes slideInFromBottom {
       from {
         opacity: 0;
-        transform: translateX(-50%) translateY(-20px);
+        transform: translateX(-50%) translateY(-10px);
       }
       to {
         opacity: 1;
@@ -3423,19 +3449,20 @@ function addNotionIconStyles() {
       }
     }
     
-    @keyframes slideOutToTop {
+    @keyframes slideOutToBottom {
       from {
         opacity: 1;
         transform: translateX(-50%) translateY(0);
       }
       to {
         opacity: 0;
-        transform: translateX(-50%) translateY(-20px);
+        transform: translateX(-50%) translateY(-10px);
       }
     }
     
     .notion-save-icon:hover .notion-icon-tooltip {
       display: block !important;
+      animation: slideInFromBottom 0.2s ease-out;
     }
     
     .notion-save-icon svg {
@@ -4244,6 +4271,12 @@ function showErrorIcon(iconElement, errorMessage) {
   } else if (errorMessage && errorMessage.includes('Database ID')) {
     displayText = 'DB未設定';
     tooltipText = 'Notionデータベースが設定されていません。拡張機能の設定を確認してください。';
+  } else if (errorMessage && errorMessage.includes('Chrome拡張機能APIが利用できません')) {
+    displayText = 'API無効';
+    tooltipText = '拡張機能が無効化されています。ページを再読み込みしてください。';
+  } else if (errorMessage && errorMessage.includes('Background scriptとの通信に失敗')) {
+    displayText = '通信失敗';
+    tooltipText = '拡張機能の内部通信エラーです。拡張機能を再読み込みしてください。';
   }
   
   iconElement.innerHTML = `
@@ -4254,29 +4287,37 @@ function showErrorIcon(iconElement, errorMessage) {
     <div class="notion-icon-tooltip" style="
       display: none;
       position: absolute;
-      bottom: 100%;
+      top: 100%;
       left: 50%;
       transform: translateX(-50%);
       background: rgba(0, 0, 0, 0.9);
       color: white;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      white-space: nowrap;
-      max-width: 250px;
-      white-space: normal;
-      text-align: center;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.4;
+      max-width: 280px;
+      min-width: 200px;
+      width: max-content;
+      text-align: right;
       z-index: 10000;
-      margin-bottom: 5px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      margin-top: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      word-break: break-word;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      white-space: normal;
+      hyphens: auto;
     ">${tooltipText}</div>
   `;
   
-  // ホバー時にツールチップを表示
+  // ホバー時にツールチップを表示（位置調整機能付き）
   iconElement.addEventListener('mouseenter', () => {
     const tooltip = iconElement.querySelector('.notion-icon-tooltip');
     if (tooltip) {
       tooltip.style.display = 'block';
+      adjustTooltipPosition(tooltip, iconElement);
     }
   });
   
@@ -4293,6 +4334,120 @@ function showErrorIcon(iconElement, errorMessage) {
   // 長文エラーの場合は少し長めに表示（8秒）、その他は5秒
   const displayTime = displayText === '長文エラー' ? 8000 : 5000;
   setTimeout(() => resetIcon(iconElement), displayTime);
+}
+
+// ツールチップ位置の動的調整関数
+function adjustTooltipPosition(tooltip, iconElement) {
+  if (!tooltip || !iconElement) return;
+  
+  // 一旦デフォルト位置にリセット
+  tooltip.style.top = '100%';
+  tooltip.style.bottom = 'auto';
+  tooltip.style.left = 'auto';
+  tooltip.style.right = '0';
+  tooltip.style.transform = 'none';
+  tooltip.style.marginTop = '8px';
+  tooltip.style.marginBottom = '0';
+  
+  // 矢印もリセット
+  const existingArrow = tooltip.querySelector('.tooltip-arrow');
+  if (existingArrow) {
+    existingArrow.remove();
+  }
+  
+  // 位置を計算するため、一時的に表示
+  const originalDisplay = tooltip.style.display;
+  tooltip.style.display = 'block';
+  tooltip.style.visibility = 'hidden';
+  
+  try {
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const iconRect = iconElement.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    let finalPosition = 'bottom'; // デフォルトは下
+    let horizontalPosition = 'right'; // デフォルトは右端揃え
+    
+    // 下に表示した場合に画面外に出るかチェック
+    if (tooltipRect.bottom > viewportHeight - 10) {
+      // 上に表示
+      tooltip.style.top = 'auto';
+      tooltip.style.bottom = '100%';
+      tooltip.style.marginTop = '0';
+      tooltip.style.marginBottom = '8px';
+      finalPosition = 'top';
+    }
+    
+    // 左右の位置調整（右端揃えを基本とするが、画面外チェック）
+    if (tooltipRect.right > viewportWidth - 10) {
+      // 右端に寄りすぎている場合、画面内に収まるように調整
+      const overflowAmount = tooltipRect.right - (viewportWidth - 10);
+      tooltip.style.right = `${overflowAmount}px`;
+      horizontalPosition = 'right-adjusted';
+    } else if (tooltipRect.left < 10) {
+      // 左端に寄りすぎている場合は左揃えに変更
+      tooltip.style.left = '0';
+      tooltip.style.right = 'auto';
+      horizontalPosition = 'left';
+    }
+    // それ以外は右端揃えのまま
+    
+    // 矢印を追加
+    const arrow = document.createElement('div');
+    arrow.className = 'tooltip-arrow';
+    arrow.style.cssText = `
+      position: absolute;
+      width: 0;
+      height: 0;
+      border: 6px solid transparent;
+    `;
+    
+    if (finalPosition === 'bottom') {
+      // 下に表示する場合、上向きの矢印
+      arrow.style.top = '-12px';
+      arrow.style.borderBottomColor = 'rgba(0, 0, 0, 0.9)';
+      arrow.style.borderTop = 'none';
+    } else {
+      // 上に表示する場合、下向きの矢印
+      arrow.style.bottom = '-12px';
+      arrow.style.borderTopColor = 'rgba(0, 0, 0, 0.9)';
+      arrow.style.borderBottom = 'none';
+    }
+    
+    // 矢印の水平位置（ボタンの中央に配置）
+    if (horizontalPosition === 'left') {
+      arrow.style.left = '20px';
+    } else if (horizontalPosition === 'right-adjusted') {
+      // 右端調整の場合、ボタンの中央を基準に計算
+      const buttonWidth = iconRect.width;
+      const overflowAmount = tooltipRect.right - (viewportWidth - 10);
+      arrow.style.right = `${buttonWidth / 2 - 6 + overflowAmount}px`;
+    } else {
+      // 通常の右端揃えの場合、ボタンの中央に矢印を配置
+      const buttonWidth = iconRect.width;
+      arrow.style.right = `${buttonWidth / 2 - 6}px`; // 矢印の幅の半分を引く
+    }
+    
+    tooltip.appendChild(arrow);
+    
+    // 位置調整後に再度チェック（確実に画面内に収める）
+    const finalRect = tooltip.getBoundingClientRect();
+    if (finalRect.right > viewportWidth - 5) {
+      const additionalAdjust = finalRect.right - (viewportWidth - 5);
+      const currentRight = parseInt(tooltip.style.right) || 0;
+      tooltip.style.right = `${currentRight + additionalAdjust}px`;
+    }
+    if (finalRect.left < 5) {
+      tooltip.style.left = '5px';
+      tooltip.style.right = 'auto';
+    }
+    
+  } finally {
+    // 表示状態を元に戻す
+    tooltip.style.display = originalDisplay;
+    tooltip.style.visibility = 'visible';
+  }
 }
 
 function showAlreadySavedIcon(iconElement) {
