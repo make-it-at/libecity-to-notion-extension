@@ -1689,6 +1689,9 @@ function addNotionIconToTweetPost(tweetElement, index = 0) {
       }
     });
     
+    // 保存済みチェック
+    checkAndUpdateSavedStatus(tweetElement, iconContainer, true);
+    
     // クリックイベント（つぶやき専用処理を使用）
     iconContainer.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -1830,6 +1833,9 @@ function addNotionIconToRegularPost(postElement, index = 0) {
         iconContainer.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
       }
     });
+    
+    // 保存済みチェック
+    checkAndUpdateSavedStatus(postElement, iconContainer, false);
     
     // クリックイベント（通常投稿用処理を使用）
     iconContainer.addEventListener('click', async (e) => {
@@ -3015,10 +3021,18 @@ async function handleNotionSave(postElement, iconElement) {
     
     console.log('Processing as general post (confirmed not tweet)');
     
-    // 重複チェック
+    // 重複チェック（新しい保存済み情報も確認）
     const postId = getPostUniqueId(postElement);
     console.log('Generated post ID:', postId);
     console.log('Currently saved posts:', Array.from(savedPosts));
+    
+    // 既存の保存済み情報をチェック
+    const existingSave = await getSavedPostInfo(postId);
+    if (existingSave && existingSave.pageUrl) {
+      console.log('Post already saved with URL, showing existing page link');
+      showAlreadySavedIcon(iconElement, existingSave.pageUrl);
+      return;
+    }
     
     if (savedPosts.has(postId)) {
       console.log('Post already saved, skipping:', postId);
@@ -3160,8 +3174,14 @@ async function handleNotionSave(postElement, iconElement) {
         showImageFailureCallout(response.imageFailures);
       }
       
+      // 保存成功時にページURLを記録
+      if (response.pageUrl) {
+        const postId = getPostUniqueId(postElement);
+        await saveSavedPostInfo(postId, response.pageUrl, response.pageId);
+      }
+      
       // 成功時のアイコン表示
-      showSuccessIcon(iconElement);
+      showSuccessIcon(iconElement, response.pageUrl);
       
       console.log('Post saved to Notion successfully');
       
@@ -3452,6 +3472,11 @@ function addNotionIconStyles() {
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
+    }
+    
+    /* ボタンホバー効果のスムーズなトランジション */
+    .notion-icon {
+      transition: all 0.2s ease !important;
     }
     
     @keyframes slideInFromBottom {
@@ -4107,6 +4132,15 @@ async function handleTweetSave(tweetElement, iconElement) {
       throw new Error('拡張機能のコンテキストが無効化されています。ページを再読み込みしてください。');
     }
     
+    // 重複保存チェック
+    const postId = getTweetUniqueId(tweetElement);
+    const existingSave = await getSavedPostInfo(postId);
+    if (existingSave && existingSave.pageUrl) {
+      console.log('Post already saved, showing existing page link');
+      showAlreadySavedIcon(iconElement, existingSave.pageUrl);
+      return;
+    }
+    
     // つぶやき投稿の検証
     if (!isTweetPost(tweetElement)) {
       throw new Error('つぶやき投稿ではありません');
@@ -4273,7 +4307,13 @@ async function handleTweetSave(tweetElement, iconElement) {
         console.log('All images saved successfully (if any)');
       }
       
-      showSuccessIcon(iconElement);
+      // 保存成功時にページURLを記録
+      if (response.pageUrl) {
+        const postId = getTweetUniqueId(tweetElement);
+        await saveSavedPostInfo(postId, response.pageUrl, response.pageId);
+      }
+      
+      showSuccessIcon(iconElement, response.pageUrl);
       
     } else {
       // ユーザーフレンドリーなエラーメッセージに変換
@@ -4320,18 +4360,52 @@ function showSavingIcon(iconElement) {
   `;
 }
 
-function showSuccessIcon(iconElement) {
+function showSuccessIcon(iconElement, pageUrl = null) {
   iconElement.style.background = '#28a745';
   iconElement.style.color = 'white';
-  iconElement.innerHTML = `
-    <svg viewBox="0 0 24 24" width="14" height="14">
-      <path fill="white" d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
-    </svg>
-    <span>保存完了!</span>
-  `;
+  iconElement.style.cursor = pageUrl ? 'pointer' : 'default';
   
-  // 3秒後に元に戻す
-  setTimeout(() => resetIcon(iconElement), 3000);
+  if (pageUrl) {
+    // Notionで開くボタン
+    iconElement.innerHTML = `
+      <svg viewBox="0 0 24 24" width="14" height="14">
+        <path fill="white" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z"/>
+      </svg>
+      <span>Notionで開く</span>
+    `;
+    
+    // クリックイベントを追加
+    iconElement.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(pageUrl, '_blank');
+    };
+    
+    // ホバー効果を追加
+    iconElement.addEventListener('mouseenter', () => {
+      iconElement.style.background = '#218838';
+      iconElement.style.transform = 'scale(1.05)';
+    });
+    
+    iconElement.addEventListener('mouseleave', () => {
+      iconElement.style.background = '#28a745';
+      iconElement.style.transform = 'scale(1)';
+    });
+    
+    // 10秒後に元に戻す（長めに表示）
+    setTimeout(() => resetIcon(iconElement), 10000);
+  } else {
+    // 従来の保存完了表示
+    iconElement.innerHTML = `
+      <svg viewBox="0 0 24 24" width="14" height="14">
+        <path fill="white" d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+      </svg>
+      <span>保存完了!</span>
+    `;
+    
+    // 3秒後に元に戻す
+    setTimeout(() => resetIcon(iconElement), 3000);
+  }
 }
 
 function showErrorIcon(iconElement, errorMessage) {
@@ -4563,23 +4637,70 @@ function adjustTooltipPosition(tooltip, iconElement) {
   }
 }
 
-function showAlreadySavedIcon(iconElement) {
+function showAlreadySavedIcon(iconElement, pageUrl = null) {
   iconElement.style.background = '#4CAF50';
   iconElement.style.color = 'white';
-  iconElement.innerHTML = `
-    <svg viewBox="0 0 24 24" width="14" height="14">
-      <path fill="white" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-    </svg>
-    <span>保存済み</span>
-  `;
+  iconElement.style.cursor = pageUrl ? 'pointer' : 'default';
   
-  // 2秒後に元に戻す
-  setTimeout(() => resetIcon(iconElement), 2000);
+  if (pageUrl) {
+    // Notionで開くボタン（保存済み）
+    iconElement.innerHTML = `
+      <svg viewBox="0 0 24 24" width="14" height="14">
+        <path fill="white" d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z"/>
+      </svg>
+      <span>保存済み</span>
+    `;
+    
+    // クリックイベントを追加
+    iconElement.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(pageUrl, '_blank');
+    };
+    
+    // ホバー効果を追加
+    iconElement.addEventListener('mouseenter', () => {
+      iconElement.style.background = '#45a049';
+      iconElement.style.transform = 'scale(1.05)';
+      // ホバー時にテキストを変更
+      const span = iconElement.querySelector('span');
+      if (span) span.textContent = 'Notionで開く';
+    });
+    
+    iconElement.addEventListener('mouseleave', () => {
+      iconElement.style.background = '#4CAF50';
+      iconElement.style.transform = 'scale(1)';
+      // ホバー終了時にテキストを戻す
+      const span = iconElement.querySelector('span');
+      if (span) span.textContent = '保存済み';
+    });
+    
+    // ボタンは永続的に表示（タイムアウトなし）
+  } else {
+    // 従来の保存済み表示
+    iconElement.innerHTML = `
+      <svg viewBox="0 0 24 24" width="14" height="14">
+        <path fill="white" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+      </svg>
+      <span>保存済み</span>
+    `;
+    
+    // 2秒後に元に戻す
+    setTimeout(() => resetIcon(iconElement), 2000);
+  }
 }
 
 function resetIcon(iconElement) {
   iconElement.style.background = 'rgba(255, 255, 255, 0.9)';
   iconElement.style.color = '#666';
+  iconElement.style.cursor = '';
+  iconElement.style.transform = '';
+  
+  // イベントリスナーをクリア
+  iconElement.onclick = null;
+  iconElement.onmouseenter = null;
+  iconElement.onmouseleave = null;
+  
   iconElement.innerHTML = `
     <svg viewBox="0 0 24 24" width="14" height="14">
       <path fill="currentColor" d="M4,6H2V20A2,2 0 0,0 4,22H18V20H4V6M20,2H8A2,2 0 0,0 6,4V16A2,2 0 0,0 8,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M20,16H8V4H20V16M16,6H18V8H16V6M16,9H18V11H16V9M16,12H18V14H16V12M11,9H15V11H11V9M11,12H15V14H11V12M11,6H15V8H11V6Z"/>
@@ -5094,4 +5215,60 @@ function createCombinedTextBlock(textItems) {
   };
 }
 
-// ... existing code ...
+// 保存済み投稿の情報管理
+async function saveSavedPostInfo(postId, pageUrl, pageId) {
+  try {
+    if (!postId || !pageUrl) return;
+    
+    const savedPosts = await getSavedPostsInfo();
+    savedPosts[postId] = {
+      pageUrl: pageUrl,
+      pageId: pageId,
+      savedAt: Date.now(),
+      timestamp: new Date().toISOString()
+    };
+    
+    await chrome.storage.local.set({ savedPosts: savedPosts });
+    console.log('Saved post info:', postId, pageUrl);
+  } catch (error) {
+    console.error('Failed to save post info:', error);
+  }
+}
+
+async function getSavedPostsInfo() {
+  try {
+    const result = await chrome.storage.local.get(['savedPosts']);
+    return result.savedPosts || {};
+  } catch (error) {
+    console.error('Failed to get saved posts info:', error);
+    return {};
+  }
+}
+
+async function getSavedPostInfo(postId) {
+  try {
+    if (!postId) return null;
+    
+    const savedPosts = await getSavedPostsInfo();
+    return savedPosts[postId] || null;
+  } catch (error) {
+    console.error('Failed to get saved post info:', error);
+    return null;
+  }
+}
+
+// 保存済み状態をチェックして表示を更新
+async function checkAndUpdateSavedStatus(postElement, iconElement, isTweet) {
+  try {
+    const postId = isTweet ? getTweetUniqueId(postElement) : getPostUniqueId(postElement);
+    if (!postId) return;
+    
+    const savedInfo = await getSavedPostInfo(postId);
+    if (savedInfo && savedInfo.pageUrl) {
+      console.log(`Post already saved: ${postId} -> ${savedInfo.pageUrl}`);
+      showAlreadySavedIcon(iconElement, savedInfo.pageUrl);
+    }
+  } catch (error) {
+    console.error('Failed to check saved status:', error);
+  }
+}
