@@ -3000,6 +3000,11 @@ async function handleNotionSave(postElement, iconElement) {
     console.log('=== STARTING GENERAL NOTION SAVE PROCESS ===');
     console.log('Post element:', postElement);
     
+    // 拡張機能コンテキストの有効性チェック
+    if (!isExtensionContextValid()) {
+      throw new Error('拡張機能のコンテキストが無効化されています。ページを再読み込みしてください。');
+    }
+    
     // つぶやき投稿の場合は専用処理にリダイレクト
     const isTweet = isTweetPost(postElement);
     console.log(`Tweet post check: ${isTweet}, current page: ${window.location.pathname}`);
@@ -3078,6 +3083,11 @@ async function handleNotionSave(postElement, iconElement) {
       return;
     }
     
+    // Chrome API利用可能性チェック
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
+      throw new Error('Chrome拡張機能APIが利用できません。ページを再読み込みしてください。');
+    }
+
     // 保存先データベースを取得
     let databaseId;
     try {
@@ -3110,6 +3120,12 @@ async function handleNotionSave(postElement, iconElement) {
     let response;
     try {
       response = await new Promise((resolve, reject) => {
+        // runtime API利用可能性チェック
+        if (!chrome.runtime || !chrome.runtime.sendMessage) {
+          reject(new Error('Chrome拡張機能のランタイムAPIが利用できません'));
+          return;
+        }
+        
         chrome.runtime.sendMessage({
           action: 'saveToNotion',
           databaseId: databaseId,
@@ -4053,10 +4069,43 @@ function getTweetUniqueId(tweetElement) {
   return fallbackId;
 }
 
+// Chrome拡張機能のコンテキスト有効性チェック
+function isExtensionContextValid() {
+  try {
+    // Chrome APIの基本的な存在確認
+    if (typeof chrome === 'undefined') {
+      console.error('Chrome object is undefined');
+      return false;
+    }
+    
+    // Runtime IDの確認（拡張機能が有効な場合のみ存在）
+    if (!chrome.runtime || !chrome.runtime.id) {
+      console.error('Chrome runtime ID is not available');
+      return false;
+    }
+    
+    // Storage APIの確認
+    if (!chrome.storage || !chrome.storage.sync) {
+      console.error('Chrome storage API is not available');
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Extension context validation failed:', error);
+    return false;
+  }
+}
+
 // つぶやき投稿専用の保存処理
 async function handleTweetSave(tweetElement, iconElement) {
   try {
     console.log('=== STARTING TWEET-SPECIFIC SAVE PROCESS ===');
+    
+    // 拡張機能コンテキストの有効性チェック
+    if (!isExtensionContextValid()) {
+      throw new Error('拡張機能のコンテキストが無効化されています。ページを再読み込みしてください。');
+    }
     
     // つぶやき投稿の検証
     if (!isTweetPost(tweetElement)) {
@@ -4093,9 +4142,38 @@ async function handleTweetSave(tweetElement, iconElement) {
       throw new Error('つぶやきテキストが短すぎます');
     }
     
+    // Chrome API利用可能性チェック
+    console.log('=== CHROME API AVAILABILITY CHECK ===');
+    console.log('typeof chrome:', typeof chrome);
+    console.log('chrome object:', chrome);
+    console.log('chrome.storage:', chrome?.storage);
+    console.log('chrome.storage.sync:', chrome?.storage?.sync);
+    console.log('chrome.runtime:', chrome?.runtime);
+    console.log('chrome.runtime.id:', chrome?.runtime?.id);
+    console.log('========================================');
+    
+    if (typeof chrome === 'undefined') {
+      throw new Error('Chrome拡張機能オブジェクトが利用できません。ページを再読み込みしてください。');
+    }
+    
+    if (!chrome.storage) {
+      throw new Error('Chrome拡張機能のストレージAPIが利用できません。拡張機能を再読み込みしてください。');
+    }
+    
+    if (!chrome.storage.sync) {
+      throw new Error('Chrome拡張機能のsync storageが利用できません。拡張機能の設定を確認してください。');
+    }
+
     // 保存先データベース取得
-    const settings = await chrome.storage.sync.get(['notionDatabaseId']);
-    const databaseId = settings.notionDatabaseId;
+    let settings, databaseId;
+    try {
+      settings = await chrome.storage.sync.get(['notionDatabaseId']);
+      databaseId = settings.notionDatabaseId;
+    } catch (error) {
+      console.error('Failed to get settings from chrome.storage.sync:', error);
+      console.error('Error details:', error.stack);
+      throw new Error('設定の読み込みに失敗しました。拡張機能を再読み込みしてください。');
+    }
     
     // データベースIDの診断情報を表示
     console.log('=== TWEET SAVE DATABASE ID DIAGNOSTIC ===');
@@ -4129,6 +4207,12 @@ async function handleTweetSave(tweetElement, iconElement) {
     });
     
     const response = await new Promise((resolve, reject) => {
+      // runtime API利用可能性チェック
+      if (!chrome.runtime || !chrome.runtime.sendMessage) {
+        reject(new Error('Chrome拡張機能のランタイムAPIが利用できません'));
+        return;
+      }
+      
       chrome.runtime.sendMessage({
         action: 'saveToNotion',
         databaseId: databaseId,
@@ -4211,6 +4295,8 @@ async function handleTweetSave(tweetElement, iconElement) {
     
   } catch (error) {
     console.error('Tweet save failed:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Save error details:', error.message);
     
     // 長文エラーの場合は詳細コールアウトも表示
     if (error.message && error.message.includes('テキストが長すぎます')) {
@@ -4277,6 +4363,33 @@ function showErrorIcon(iconElement, errorMessage) {
   } else if (errorMessage && errorMessage.includes('Background scriptとの通信に失敗')) {
     displayText = '通信失敗';
     tooltipText = '拡張機能の内部通信エラーです。拡張機能を再読み込みしてください。';
+  } else if (errorMessage && errorMessage.includes('Cannot read properties of undefined')) {
+    displayText = '設定エラー';
+    tooltipText = '拡張機能の設定に問題があります。ポップアップから設定を確認してください。';
+  } else if (errorMessage && errorMessage.includes('reading \'sync\'')) {
+    displayText = '設定エラー';
+    tooltipText = '設定の読み込みに失敗しました。拡張機能を再読み込みしてください。';
+  } else if (errorMessage && errorMessage.includes('undefined')) {
+    displayText = '初期化エラー';
+    tooltipText = '拡張機能の初期化に失敗しました。ページを再読み込みしてください。';
+  } else if (errorMessage && errorMessage.includes('chrome is not defined')) {
+    displayText = 'API無効';
+    tooltipText = 'Chrome拡張機能APIが利用できません。ページを再読み込みしてください。';
+  } else if (errorMessage && errorMessage.includes('Extension context invalidated')) {
+    displayText = '拡張無効';
+    tooltipText = '拡張機能が無効化されました。拡張機能を再読み込みしてください。';
+  } else if (errorMessage && errorMessage.includes('runtime')) {
+    displayText = 'ランタイム';
+    tooltipText = '拡張機能のランタイムエラーです。ページを再読み込みしてください。';
+  } else if (errorMessage && errorMessage.includes('ストレージAPIが利用できません')) {
+    displayText = 'ストレージ';
+    tooltipText = '拡張機能のストレージAPIが無効です。拡張機能を再読み込みしてください。';
+  } else if (errorMessage && errorMessage.includes('sync storageが利用できません')) {
+    displayText = 'Sync無効';
+    tooltipText = '拡張機能の同期ストレージが無効です。拡張機能の権限を確認してください。';
+  } else if (errorMessage && errorMessage.includes('コンテキストが無効化されています')) {
+    displayText = 'コンテキスト';
+    tooltipText = '拡張機能が無効化されました。ページを再読み込みしてください。';
   }
   
   iconElement.innerHTML = `
