@@ -1,79 +1,117 @@
-/* LibeCity to Notion - Content Script Styles */
+/* ebayCPaSS2GoogleSheets Content Script Styles */
 
-/* 選択モード用のスタイル */
-.libecity-notion-selecting {
-  cursor: crosshair !important;
+/* 抽出された要素のハイライト */
+.ebaycpass-extracted {
+  position: relative;
+  box-shadow: 0 0 0 2px #4CAF50 !important;
+  border-radius: 4px !important;
+  background-color: rgba(76, 175, 80, 0.1) !important;
+  transition: all 0.3s ease !important;
 }
 
-.libecity-notion-selecting * {
-  cursor: crosshair !important;
+.ebaycpass-extracted.estimated-cost {
+  box-shadow: 0 0 0 2px #2196F3 !important;
+  background-color: rgba(33, 150, 243, 0.1) !important;
 }
 
-/* ハイライトオーバーレイ */
-.libecity-notion-highlight {
+.ebaycpass-extracted.tracking-number {
+  box-shadow: 0 0 0 2px #FF9800 !important;
+  background-color: rgba(255, 152, 0, 0.1) !important;
+}
+
+.ebaycpass-extracted.last-mile-number {
+  box-shadow: 0 0 0 2px #9C27B0 !important;
+  background-color: rgba(156, 39, 176, 0.1) !important;
+}
+
+/* 抽出された要素のラベル */
+.ebaycpass-extracted::before {
+  content: '✓ 抽出済み';
   position: absolute;
-  pointer-events: none;
-  border: 2px solid #007bff;
-  background-color: rgba(0, 123, 255, 0.1);
-  z-index: 10000;
-  transition: all 0.1s ease;
-}
-
-/* 選択された要素のスタイル */
-.libecity-notion-selected {
-  outline: 2px solid #28a745 !important;
-  outline-offset: 2px;
-  background-color: rgba(40, 167, 69, 0.1) !important;
-}
-
-/* 拡張機能用のボタン */
-.libecity-notion-button {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  top: -20px;
+  left: 0;
+  background: #4CAF50;
   color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: bold;
+  z-index: 1000;
+  white-space: nowrap;
+  font-family: Arial, sans-serif;
+}
+
+.ebaycpass-extracted.estimated-cost::before {
+  content: '💰 推定送料';
+  background: #2196F3;
+}
+
+.ebaycpass-extracted.tracking-number::before {
+  content: '📦 追跡番号';
+  background: #FF9800;
+}
+
+.ebaycpass-extracted.last-mile-number::before {
+  content: '🚚 ラストマイル';
+  background: #9C27B0;
+}
+
+/* ビジュアルセレクター用のホバー効果 */
+.ebaycpass-hover {
+  outline: 2px dashed #FF5722 !important;
+  outline-offset: 2px !important;
+  background-color: rgba(255, 87, 34, 0.1) !important;
+  cursor: crosshair !important;
+  position: relative !important;
+}
+
+.ebaycpass-hover::before {
+  content: 'クリックして選択';
+  position: absolute;
+  top: -25px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #FF5722;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
   font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.libecity-notion-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
-
-.libecity-notion-button:active {
-  transform: translateY(0);
-}
-
-/* 通知メッセージ */
-.libecity-notion-notification {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  background: white;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 16px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-weight: bold;
   z-index: 10001;
-  max-width: 300px;
-  animation: slideIn 0.3s ease;
+  white-space: nowrap;
+  font-family: Arial, sans-serif;
+  pointer-events: none;
 }
 
-.libecity-notion-notification.success {
-  border-left: 4px solid #28a745;
+/* 通知スタイル */
+#ebaycpass-notification {
+  position: fixed !important;
+  top: 20px !important;
+  right: 20px !important;
+  background: #4CAF50 !important;
+  color: white !important;
+  padding: 12px 20px !important;
+  border-radius: 8px !important;
+  font-size: 14px !important;
+  z-index: 10000 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  font-weight: 500 !important;
+  max-width: 300px !important;
+  word-wrap: break-word !important;
+  animation: slideIn 0.3s ease-out !important;
 }
 
-.libecity-notion-notification.error {
-  border-left: 4px solid #dc3545;
+#ebaycpass-notification.error {
+  background: #F44336 !important;
 }
 
-.libecity-notion-notification.info {
-  border-left: 4px solid #007bff;
+#ebaycpass-notification.warning {
+  background: #FF9800 !important;
+}
+
+#ebaycpass-notification.info {
+  background: #2196F3 !important;
 }
 
 @keyframes slideIn {
@@ -87,126 +125,135 @@
   }
 }
 
-/* ローディングスピナー */
-.libecity-notion-spinner {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid #f3f3f3;
-  border-top: 2px solid #007bff;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-right: 8px;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-/* libecity.com固有のスタイル調整 */
-.log_detail.libecity-notion-selected {
+/* 抽出プロセス中の表示 */
+.ebaycpass-extracting {
   position: relative;
 }
 
-.log_detail.libecity-notion-selected::after {
-  content: "✓ 選択済み";
+.ebaycpass-extracting::after {
+  content: '';
   position: absolute;
-  top: 5px;
-  right: 5px;
-  background: #28a745;
-  color: white;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: bold;
-}
-
-/* ツールチップ */
-.libecity-notion-tooltip {
-  position: absolute;
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  white-space: nowrap;
-  z-index: 10002;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(76, 175, 80, 0.3),
+    transparent
+  );
+  animation: scanning 2s infinite;
   pointer-events: none;
+  z-index: 999;
 }
 
-/* 拡張機能のフローティングアクションボタン */
-.libecity-notion-fab {
+@keyframes scanning {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* 抽出統計情報の表示 */
+.ebaycpass-stats {
   position: fixed;
   bottom: 20px;
   right: 20px;
-  width: 56px;
-  height: 56px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border: none;
-  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.8);
   color: white;
-  font-size: 24px;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 10000;
-  transition: all 0.3s ease;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: monospace;
+  z-index: 9999;
+  max-width: 250px;
+  backdrop-filter: blur(10px);
 }
 
-.libecity-notion-fab:hover {
-  transform: scale(1.1);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+.ebaycpass-stats .stat-item {
+  display: flex;
+  justify-content: space-between;
+  margin: 2px 0;
 }
 
-.libecity-notion-fab:active {
-  transform: scale(0.95);
+.ebaycpass-stats .stat-label {
+  color: #ccc;
 }
 
-/* プログレスバー */
-.libecity-notion-progress {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 3px;
-  background: rgba(0, 123, 255, 0.2);
-  z-index: 10003;
+.ebaycpass-stats .stat-value {
+  font-weight: bold;
+  color: #4CAF50;
 }
 
-.libecity-notion-progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, #007bff, #28a745);
-  width: 0%;
-  transition: width 0.3s ease;
-}
-
-/* レスポンシブ対応 */
+/* レスポンシブデザイン */
 @media (max-width: 768px) {
-  .libecity-notion-notification {
+  #ebaycpass-notification {
+    top: 10px !important;
+    right: 10px !important;
+    left: 10px !important;
+    max-width: none !important;
+  }
+  
+  .ebaycpass-stats {
+    bottom: 10px;
     right: 10px;
     left: 10px;
     max-width: none;
   }
   
-  .libecity-notion-fab {
-    bottom: 15px;
-    right: 15px;
-    width: 48px;
-    height: 48px;
-    font-size: 20px;
+  .ebaycpass-extracted::before {
+    font-size: 10px;
+    padding: 1px 6px;
   }
 }
 
 /* ダークモード対応 */
 @media (prefers-color-scheme: dark) {
-  .libecity-notion-notification {
-    background: #2d3748;
-    border-color: #4a5568;
-    color: white;
+  .ebaycpass-extracted {
+    background-color: rgba(76, 175, 80, 0.2) !important;
   }
   
-  .libecity-notion-tooltip {
-    background: rgba(255, 255, 255, 0.9);
-    color: black;
+  .ebaycpass-extracted.estimated-cost {
+    background-color: rgba(33, 150, 243, 0.2) !important;
+  }
+  
+  .ebaycpass-extracted.tracking-number {
+    background-color: rgba(255, 152, 0, 0.2) !important;
+  }
+  
+  .ebaycpass-extracted.last-mile-number {
+    background-color: rgba(156, 39, 176, 0.2) !important;
+  }
+  
+  .ebaycpass-hover {
+    background-color: rgba(255, 87, 34, 0.2) !important;
+  }
+}
+
+/* アクセシビリティ対応 */
+@media (prefers-reduced-motion: reduce) {
+  .ebaycpass-extracted {
+    transition: none !important;
+  }
+  
+  #ebaycpass-notification {
+    animation: none !important;
+  }
+  
+  .ebaycpass-extracting::after {
+    animation: none !important;
+  }
+}
+
+/* 印刷時のスタイル */
+@media print {
+  .ebaycpass-extracted,
+  .ebaycpass-hover,
+  #ebaycpass-notification,
+  .ebaycpass-stats {
+    display: none !important;
   }
 } 

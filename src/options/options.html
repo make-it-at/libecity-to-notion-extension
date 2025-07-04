@@ -3,184 +3,89 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LibeCity to Notion - 設定</title>
+  <title>ebayCPaSS2GoogleSheets - 設定</title>
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
   <div class="container">
-    <header class="header">
-      <h1>LibeCity to Notion</h1>
-      <p class="subtitle">設定</p>
+    <header>
+      <h1>ebayCPaSS2GoogleSheets 設定</h1>
+      <p>配送情報抽出ツールの設定を行います</p>
     </header>
-
-    <main class="main">
-      <!-- API設定 -->
-      <section class="section">
-        <h2>Notion API設定</h2>
-        <div class="form-group">
-          <label for="apiKey">APIキー:</label>
-          <input type="password" id="apiKey" placeholder="secret_xxxxxxxxx">
-          <button type="button" id="toggleApiKey" class="toggle-btn">表示</button>
+    
+    <main>
+      <section class="settings-section">
+        <h2>抽出設定</h2>
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="autoExtract">
+            <span>自動抽出を有効にする</span>
+          </label>
+          <p class="description">ページ読み込み時に自動的にデータを抽出します</p>
         </div>
-        <div class="form-group">
-          <button type="button" id="testConnection" class="btn btn-secondary">接続テスト</button>
-          <span id="connectionResult" class="connection-result"></span>
+        
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="showNotifications">
+            <span>通知を表示する</span>
+          </label>
+          <p class="description">抽出完了時に通知を表示します</p>
         </div>
-        <div class="form-group auth-actions">
-          <button type="button" id="openNotionAuth" class="btn btn-secondary">
-            🔗 Notion認証ページを開く
-          </button>
-          <button type="button" id="createWorkspace" class="btn btn-secondary">
-            🏗️ ワークスペースを作成
-          </button>
-        </div>
-        <div class="form-group auth-actions">
-          <button type="button" id="openIntegrationGuide" class="btn btn-info">
-            📖 統合招待ガイドを開く
-          </button>
-          <button type="button" id="checkIntegrationStatus" class="btn btn-info">
-            ✅ 統合状態を確認
-          </button>
-        </div>
-        <div class="help-text">
-          <p>Notion APIキーの取得方法:</p>
-          <ol>
-            <li>上記の「🔗 Notion認証ページを開く」ボタンをクリック</li>
-            <li>Notionで新しい統合（Integration）を作成</li>
-            <li>統合名を入力（例：「LibeCity to Notion」）</li>
-            <li>対象のワークスペースを選択</li>
-            <li>「Submit」をクリックして統合を作成</li>
-            <li>生成された「Internal Integration Token」をコピー</li>
-            <li>上記のAPIキー欄に貼り付け</li>
-            <li>「接続テスト」で動作確認</li>
-          </ol>
-          <div class="auth-note">
-            <strong>重要:</strong> 統合作成後、使用したいページやデータベースに統合を招待する必要があります。
-            ページの「共有」→「招待」から作成した統合を追加してください。
-          </div>
-          
-          <div class="step-by-step">
-            <h4>📋 完全セットアップ手順</h4>
-            <div class="steps">
-              <div class="step">
-                <div class="step-number">1</div>
-                <div class="step-content">
-                  <strong>統合作成</strong><br>
-                  「🔗 Notion認証ページを開く」→ 統合を作成 → APIキーをコピー
-                </div>
-              </div>
-              <div class="step">
-                <div class="step-number">2</div>
-                <div class="step-content">
-                  <strong>APIキー設定</strong><br>
-                  上記フィールドにAPIキーを貼り付け → 「接続テスト」で確認
-                </div>
-              </div>
-              <div class="step">
-                <div class="step-number">3</div>
-                <div class="step-content">
-                  <strong>統合招待</strong><br>
-                  Notionページで「共有」→「招待」→ 統合名を入力して招待
-                </div>
-              </div>
-              <div class="step">
-                <div class="step-number">4</div>
-                <div class="step-content">
-                  <strong>動作確認</strong><br>
-                  「✅ 統合状態を確認」で最終チェック → 設定完了！
-                </div>
-              </div>
-            </div>
-          </div>
+        
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="csvAutoDownload">
+            <span>CSV自動ダウンロード</span>
+          </label>
+          <p class="description">抽出後に自動的にCSVファイルをダウンロードします</p>
         </div>
       </section>
-
-      <!-- 保存設定 -->
-      <section class="section">
-        <h2>保存設定</h2>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="saveImages">
-            画像も保存する
-          </label>
+      
+      <section class="settings-section">
+        <h2>CSV設定</h2>
+        <div class="setting-item">
+          <label for="csvFilename">ファイル名テンプレート:</label>
+          <input type="text" id="csvFilename" placeholder="ebaycpass_data_{date}.csv">
+          <p class="description">利用可能な変数: {date}, {time}, {timestamp}</p>
         </div>
-        <div class="form-group">
+        
+        <div class="setting-item">
           <label>
-            <input type="checkbox" id="saveLinks">
-            リンクも保存する
-          </label>
-        </div>
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="notifications">
-            保存完了時に通知を表示する
+            <input type="checkbox" id="includeHeaders">
+            <span>ヘッダー行を含める</span>
           </label>
         </div>
       </section>
-
-      <!-- デフォルトデータベース -->
-      <section class="section">
-        <h2>デフォルトデータベース</h2>
-        <div class="form-group">
-          <label for="defaultDatabase">デフォルトデータベース:</label>
-          <select id="defaultDatabase">
-            <option value="">選択してください...</option>
-          </select>
-          <button type="button" id="refreshDatabases" class="btn btn-secondary">更新</button>
-        </div>
-      </section>
-
-      <!-- 統計情報 -->
-      <section class="section">
-        <h2>統計情報</h2>
-        <div class="stats-grid">
-          <div class="stat-item">
-            <span class="stat-label">総保存数:</span>
-            <span id="totalSaved" class="stat-value">-</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">最終保存:</span>
-            <span id="lastSaved" class="stat-value">-</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">エラー数:</span>
-            <span id="errorCount" class="stat-value">-</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- データ管理 -->
-      <section class="section">
+      
+      <section class="settings-section">
         <h2>データ管理</h2>
-        <div class="form-group">
-          <button type="button" id="exportSettings" class="btn btn-secondary">設定をエクスポート</button>
-          <button type="button" id="importSettings" class="btn btn-secondary">設定をインポート</button>
-          <input type="file" id="importFile" accept=".json" style="display: none;">
+        <div class="setting-item">
+          <button id="exportData" class="btn btn-secondary">データをエクスポート</button>
+          <p class="description">全ての設定とデータをバックアップファイルとして出力</p>
         </div>
-        <div class="form-group">
-          <button type="button" id="clearHistory" class="btn btn-danger">履歴をクリア</button>
-          <button type="button" id="resetSettings" class="btn btn-danger">設定をリセット</button>
+        
+        <div class="setting-item">
+          <button id="importData" class="btn btn-secondary">データをインポート</button>
+          <input type="file" id="importFile" accept=".json" style="display: none;">
+          <p class="description">バックアップファイルから設定とデータを復元</p>
+        </div>
+        
+        <div class="setting-item">
+          <button id="clearHistory" class="btn btn-danger">履歴をクリア</button>
+          <p class="description">すべての抽出履歴を削除します（元に戻せません）</p>
         </div>
       </section>
     </main>
-
-    <footer class="footer">
+    
+    <footer>
       <div class="actions">
-        <button type="button" id="saveSettings" class="btn btn-primary">設定を保存</button>
-        <button type="button" id="cancelSettings" class="btn btn-secondary">キャンセル</button>
+        <button id="saveSettings" class="btn btn-primary">設定を保存</button>
+        <button id="resetSettings" class="btn btn-secondary">リセット</button>
       </div>
-      <div class="version">
-        バージョン 1.0.0
-      </div>
+      <div class="status" id="status"></div>
     </footer>
-
-    <!-- 通知エリア -->
-    <div id="notification" class="notification" style="display: none;">
-      <span class="notification-text"></span>
-      <button class="notification-close">×</button>
-    </div>
   </div>
-
+  
   <script src="options.js"></script>
 </body>
 </html> 

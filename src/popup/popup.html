@@ -3,128 +3,218 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LibeCity to Notion</title>
+  <title>ebayCPaSS2GoogleSheets</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="popup-container">
+  <div class="container">
     <!-- ヘッダー -->
-    <div class="popup-header">
-      <h1>LibeCity to Notion</h1>
-      <div class="version">v1.0.0</div>
-    </div>
+    <header class="header">
+      <div class="header-content">
+        <img src="../../assets/icons/icon32.png" alt="ebayCPaSS2GoogleSheets" class="logo">
+        <div class="header-text">
+          <h1 class="title">ebayCPaSS2GoogleSheets</h1>
+          <p class="version">v1.0.0</p>
+        </div>
+      </div>
+      <div class="status-indicator" id="statusIndicator">
+        <div class="status-dot"></div>
+        <span class="status-text">準備中</span>
+      </div>
+    </header>
 
-    <!-- ステータス表示 -->
-    <div class="status-section">
-      <div class="status-item">
-        <span class="status-label">接続状態:</span>
-        <span id="connectionStatus" class="status-value">確認中...</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">ページ:</span>
-        <span id="pageStatus" class="status-value">確認中...</span>
-      </div>
-    </div>
+    <!-- メインコンテンツ -->
+    <main class="main-content">
+      <!-- 現在のページ情報 -->
+      <section class="page-info" id="pageInfo">
+        <div class="info-item">
+          <span class="info-label">現在のページ:</span>
+          <span class="info-value" id="currentPage">読み込み中...</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">対象サイト:</span>
+          <span class="info-value" id="targetSite">確認中...</span>
+        </div>
+      </section>
 
-    <!-- メイン操作エリア -->
-    <div class="main-section">
-      <!-- データベース選択 -->
-      <div class="input-group">
-        <label for="databaseSelect">保存先データベース:</label>
-        <select id="databaseSelect" class="database-select">
-          <option value="">データベースを選択...</option>
-        </select>
-        <button id="refreshDatabases" class="refresh-btn" title="データベース一覧を更新">
-          <span class="refresh-icon">🔄</span>
-        </button>
-      </div>
-      
-      <!-- 新しいデータベース作成 -->
-      <div class="database-actions">
-        <button id="createDatabaseBtn" class="create-database-btn">
-          <span class="icon">🗂️</span>
-          新しいデータベースを作成
-        </button>
-      </div>
-
-      <!-- コンテンツ選択モード -->
-      <div class="content-selection">
-        <button id="selectContentBtn" class="secondary-btn">
-          <span class="icon">🎯</span>
-          コンテンツを選択
-        </button>
-        <div id="selectedContent" class="selected-content" style="display: none;">
-          <div class="selected-preview">
-            <span class="preview-text"></span>
-            <button class="clear-selection" title="選択をクリア">×</button>
+      <!-- 抽出データ表示 -->
+      <section class="extracted-data" id="extractedDataSection">
+        <h2 class="section-title">
+          <span class="icon">📊</span>
+          抽出データ
+        </h2>
+        
+        <div class="data-grid" id="dataGrid">
+          <div class="data-item">
+            <div class="data-label">
+              <span class="data-icon">💰</span>
+              推定送料
+            </div>
+            <div class="data-value" id="estimatedCost">-</div>
+          </div>
+          
+          <div class="data-item">
+            <div class="data-label">
+              <span class="data-icon">📦</span>
+              追跡番号
+            </div>
+            <div class="data-value" id="trackingNumber">-</div>
+          </div>
+          
+          <div class="data-item">
+            <div class="data-label">
+              <span class="data-icon">🚚</span>
+              ラストマイル
+            </div>
+            <div class="data-value" id="lastMileNumber">-</div>
           </div>
         </div>
-      </div>
 
-      <!-- 保存ボタン -->
-      <button id="saveToNotion" class="save-btn" disabled>
-        <span class="icon">💾</span>
-        <span class="btn-text">Notionに保存</span>
-        <div class="spinner" style="display: none;"></div>
-      </button>
-    </div>
-
-    <!-- プログレス表示 -->
-    <div id="progressSection" class="progress-section" style="display: none;">
-      <div class="progress-bar">
-        <div id="progressFill" class="progress-fill"></div>
-      </div>
-      <div id="progressText" class="progress-text">処理中...</div>
-    </div>
-
-    <!-- 成功通知 -->
-    <div id="successNotification" class="notification success" style="display: none;">
-      <div class="notification-content">
-        <span class="notification-icon">✅</span>
-        <div class="notification-text">
-          <div class="notification-title">保存完了</div>
-          <div class="notification-message">Notionに正常に保存されました</div>
+        <div class="extraction-time" id="extractionTime">
+          最終抽出: <span id="lastExtractionTime">-</span>
         </div>
-      </div>
-      <a id="notionLink" class="notion-link" target="_blank" rel="noopener">
-        <span class="icon">🔗</span>
-        Notionで開く
-      </a>
-    </div>
+      </section>
 
-    <!-- エラー通知 -->
-    <div id="errorNotification" class="notification error" style="display: none;">
-      <div class="notification-content">
-        <span class="notification-icon">❌</span>
-        <div class="notification-text">
-          <div class="notification-title">エラーが発生しました</div>
-          <div id="errorMessage" class="notification-message"></div>
+      <!-- アクションボタン -->
+      <section class="actions">
+        <button class="btn btn-primary" id="extractBtn">
+          <span class="btn-icon">🔍</span>
+          データ抽出
+        </button>
+        
+        <button class="btn btn-secondary" id="highlightBtn">
+          <span class="btn-icon">✨</span>
+          ハイライト
+        </button>
+        
+        <button class="btn btn-success" id="exportBtn" disabled>
+          <span class="btn-icon">📊</span>
+          CSV出力
+        </button>
+      </section>
+
+      <!-- 統計情報 -->
+      <section class="stats" id="statsSection">
+        <h2 class="section-title">
+          <span class="icon">📈</span>
+          統計情報
+        </h2>
+        
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value" id="totalExtracted">0</div>
+            <div class="stat-label">抽出済み</div>
+          </div>
+          
+          <div class="stat-item">
+            <div class="stat-value" id="todayExtracted">0</div>
+            <div class="stat-label">今日</div>
+          </div>
+          
+          <div class="stat-item">
+            <div class="stat-value" id="successRate">0%</div>
+            <div class="stat-label">成功率</div>
+          </div>
         </div>
-      </div>
-      <button id="retryBtn" class="retry-btn">再試行</button>
-    </div>
+      </section>
 
-    <!-- 履歴セクション -->
-    <div class="history-section">
-      <div class="section-header">
-        <h3>最近の保存履歴</h3>
-        <button id="clearHistory" class="clear-btn">クリア</button>
-      </div>
-      <div id="historyList" class="history-list">
-        <div class="no-history">履歴がありません</div>
-      </div>
-    </div>
+      <!-- 設定セクション -->
+      <section class="settings" id="settingsSection">
+        <h2 class="section-title">
+          <span class="icon">⚙️</span>
+          設定
+        </h2>
+        
+        <div class="setting-item">
+          <label class="setting-label">
+            <input type="checkbox" id="autoExtract" class="setting-checkbox">
+            <span class="setting-text">自動抽出</span>
+          </label>
+          <p class="setting-description">ページ読み込み時に自動でデータを抽出</p>
+        </div>
+        
+        <div class="setting-item">
+          <label class="setting-label">
+            <input type="checkbox" id="showNotifications" class="setting-checkbox">
+            <span class="setting-text">通知表示</span>
+          </label>
+          <p class="setting-description">抽出完了時に通知を表示</p>
+        </div>
+        
+        <div class="setting-item">
+          <label class="setting-label">
+            <input type="checkbox" id="csvAutoDownload" class="setting-checkbox">
+            <span class="setting-text">CSV自動ダウンロード</span>
+          </label>
+          <p class="setting-description">抽出後に自動でCSVファイルをダウンロード</p>
+        </div>
+      </section>
+
+      <!-- データ履歴 -->
+      <section class="history" id="historySection">
+        <h2 class="section-title">
+          <span class="icon">📋</span>
+          データ履歴
+          <button class="btn-small" id="clearHistoryBtn">クリア</button>
+        </h2>
+        
+        <div class="history-list" id="historyList">
+          <div class="history-empty">
+            <span class="empty-icon">📭</span>
+            <p>データ履歴がありません</p>
+          </div>
+        </div>
+      </section>
+    </main>
 
     <!-- フッター -->
-    <div class="popup-footer">
-      <button id="settingsBtn" class="footer-btn">
-        <span class="icon">⚙️</span>
-        設定
-      </button>
-      <button id="helpBtn" class="footer-btn">
-        <span class="icon">❓</span>
-        ヘルプ
-      </button>
+    <footer class="footer">
+      <div class="footer-links">
+        <a href="#" id="helpLink" class="footer-link">ヘルプ</a>
+        <a href="#" id="settingsLink" class="footer-link">詳細設定</a>
+        <a href="#" id="aboutLink" class="footer-link">このアプリについて</a>
+      </div>
+      <div class="footer-copyright">
+        <p>&copy; 2024 ebayCPaSS2GoogleSheets</p>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ローディングオーバーレイ -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <p class="loading-text">処理中...</p>
+  </div>
+
+  <!-- エラーモーダル -->
+  <div class="modal" id="errorModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">エラー</h3>
+        <button class="modal-close" id="errorModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="errorMessage">エラーが発生しました。</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="errorModalOk">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 成功モーダル -->
+  <div class="modal" id="successModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">成功</h3>
+        <button class="modal-close" id="successModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="successMessage">処理が完了しました。</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="successModalOk">OK</button>
+      </div>
     </div>
   </div>
 
