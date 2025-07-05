@@ -12,7 +12,7 @@ async function initialize() {
   try {
     // 設定を取得
     const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
-    if (response.success) {
+    if (response && response.success) {
       selectorConfig = response.settings.selectorConfig;
       extractionSettings = response.settings.extractionSettings;
     }
@@ -22,7 +22,7 @@ async function initialize() {
       console.log('ebayCPaSS site detected');
       
       // 自動抽出が有効な場合は実行
-      if (extractionSettings?.autoExtract) {
+      if (extractionSettings && extractionSettings.autoExtract) {
         setTimeout(extractData, 2000); // 2秒後に実行
       }
       
@@ -55,14 +55,14 @@ function observePageChanges() {
               break;
             }
           }
-        }
-      }
-    });
+            }
+          }
+        });
     
-    if (shouldReextract && extractionSettings?.autoExtract) {
+    if (shouldReextract && extractionSettings && extractionSettings.autoExtract) {
       console.log('Page content changed, re-extracting data...');
       setTimeout(extractData, 1000);
-    }
+      }
   });
   
   observer.observe(document.body, {
@@ -102,16 +102,20 @@ async function extractData() {
     
     if (hasAnyData) {
       // Background scriptに送信
-      const response = await chrome.runtime.sendMessage({
-        action: 'extractData',
-        data: extractedData
-      });
-      
-      if (response.success) {
-        console.log('Data extraction completed successfully');
-        highlightExtractedElements();
-      } else {
-        console.error('Data extraction failed:', response.error);
+      try {
+        const response = await chrome.runtime.sendMessage({
+          action: 'extractData',
+          data: extractedData
+        });
+        
+        if (response && response.success) {
+          console.log('Data extraction completed successfully');
+          highlightExtractedElements();
+    } else {
+          console.error('Data extraction failed:', response ? response.error : 'No response');
+    }
+  } catch (error) {
+        console.error('Failed to send data to background script:', error);
       }
     } else {
       console.log('No data extracted');
@@ -126,7 +130,7 @@ async function extractData() {
 
 // 推定送料の抽出
 function extractEstimatedCost() {
-  const patterns = selectorConfig?.estimatedCost?.patterns || [
+  const patterns = (selectorConfig && selectorConfig.estimatedCost && selectorConfig.estimatedCost.patterns) || [
     { selector: 'div span.value', priority: 1 },
     { selector: '.cost-display .amount', priority: 2 },
     { selector: '[data-cost] .price', priority: 3 }
@@ -138,23 +142,23 @@ function extractEstimatedCost() {
       const elements = document.querySelectorAll(pattern.selector);
       
       for (const element of elements) {
-        const text = element.textContent?.trim();
+        const text = element.textContent ? element.textContent.trim() : '';
         
         // 金額らしいテキストかチェック
         if (text && (text.includes('JPY') || text.includes('¥') || /\d+[\.,]\d+/.test(text))) {
-          console.log(`Found estimated cost with selector "${pattern.selector}":`, text);
+          console.log('Found estimated cost with selector "' + pattern.selector + '":', text);
           return text;
         }
       }
-    } catch (error) {
-      console.warn(`Selector "${pattern.selector}" failed:`, error);
+  } catch (error) {
+      console.warn('Selector "' + pattern.selector + '" failed:', error);
     }
   }
   
   // フォールバック: より広範囲な検索
   const allElements = document.querySelectorAll('*');
   for (const element of allElements) {
-    const text = element.textContent?.trim();
+    const text = element.textContent ? element.textContent.trim() : '';
     if (text && text.length < 50 && 
         (text.includes('JPY') || text.includes('¥')) &&
         /\d+[\.,]\d+/.test(text)) {
@@ -168,7 +172,7 @@ function extractEstimatedCost() {
 
 // 追跡番号の抽出
 function extractTrackingNumber() {
-  const patterns = selectorConfig?.trackingNumber?.patterns || [
+  const patterns = (selectorConfig && selectorConfig.trackingNumber && selectorConfig.trackingNumber.patterns) || [
     { selector: 'a span:empty', priority: 1 },
     { selector: '.tracking-info a', priority: 2 },
     { selector: 'a[href*="tracking"]', priority: 3 }
@@ -181,29 +185,29 @@ function extractTrackingNumber() {
       
       for (const element of elements) {
         // 空のspanの場合は親要素のテキストを取得
-        if (element.tagName === 'SPAN' && !element.textContent?.trim()) {
-          const parentText = element.parentElement?.textContent?.trim();
+        if (element.tagName === 'SPAN' && (!element.textContent || !element.textContent.trim())) {
+          const parentText = element.parentElement && element.parentElement.textContent ? element.parentElement.textContent.trim() : '';
           if (parentText && isValidTrackingNumber(parentText)) {
-            console.log(`Found tracking number with selector "${pattern.selector}":`, parentText);
+            console.log('Found tracking number with selector "' + pattern.selector + '":', parentText);
             return parentText;
           }
         } else {
-          const text = element.textContent?.trim();
+          const text = element.textContent ? element.textContent.trim() : '';
           if (text && isValidTrackingNumber(text)) {
-            console.log(`Found tracking number with selector "${pattern.selector}":`, text);
+            console.log('Found tracking number with selector "' + pattern.selector + '":', text);
             return text;
           }
         }
       }
-    } catch (error) {
-      console.warn(`Selector "${pattern.selector}" failed:`, error);
+  } catch (error) {
+      console.warn('Selector "' + pattern.selector + '" failed:', error);
     }
   }
   
   // フォールバック: 追跡番号らしいパターンを検索
   const allElements = document.querySelectorAll('*');
   for (const element of allElements) {
-    const text = element.textContent?.trim();
+    const text = element.textContent ? element.textContent.trim() : '';
     if (text && isValidTrackingNumber(text)) {
       console.log('Found tracking number with fallback search:', text);
       return text;
@@ -215,7 +219,7 @@ function extractTrackingNumber() {
 
 // ラストマイル追跡番号の抽出
 function extractLastMileNumber() {
-  const patterns = selectorConfig?.lastMileNumber?.patterns || [
+  const patterns = (selectorConfig && selectorConfig.lastMileNumber && selectorConfig.lastMileNumber.patterns) || [
     { selector: 'span.bold', priority: 1 },
     { selector: '.last-mile-tracking', priority: 2 },
     { selector: '.tracking-number', priority: 3 }
@@ -227,21 +231,21 @@ function extractLastMileNumber() {
       const elements = document.querySelectorAll(pattern.selector);
       
       for (const element of elements) {
-        const text = element.textContent?.trim();
+        const text = element.textContent ? element.textContent.trim() : '';
         if (text && isValidLastMileNumber(text)) {
-          console.log(`Found last mile number with selector "${pattern.selector}":`, text);
+          console.log('Found last mile number with selector "' + pattern.selector + '":', text);
           return text;
         }
       }
     } catch (error) {
-      console.warn(`Selector "${pattern.selector}" failed:`, error);
+      console.warn('Selector "' + pattern.selector + '" failed:', error);
     }
   }
   
   // フォールバック: 数字のみのパターンを検索
   const allElements = document.querySelectorAll('*');
   for (const element of allElements) {
-    const text = element.textContent?.trim();
+    const text = element.textContent ? element.textContent.trim() : '';
     if (text && isValidLastMileNumber(text)) {
       console.log('Found last mile number with fallback search:', text);
       return text;
@@ -304,7 +308,8 @@ function highlightElementWithText(text, className) {
   const elements = document.querySelectorAll('*');
   
   for (const element of elements) {
-    if (element.textContent?.trim() === text) {
+    const elementText = element.textContent ? element.textContent.trim() : '';
+    if (elementText === text) {
       element.classList.add('ebaycpass-extracted', className);
       break;
     }
@@ -355,20 +360,20 @@ async function testSelector(selector) {
       results.push({
         index: i,
         tagName: element.tagName,
-        textContent: element.textContent?.trim() || '',
-        innerHTML: element.innerHTML?.substring(0, 100) || '',
+        textContent: element.textContent ? element.textContent.trim() : '',
+        innerHTML: element.innerHTML ? element.innerHTML.substring(0, 100) : '',
         className: element.className || '',
         id: element.id || ''
       });
     }
-    
-    return {
+            
+            return {
       success: true,
       selector: selector,
       matchCount: elements.length,
       results: results
     };
-  } catch (error) {
+    } catch (error) {
     return {
       success: false,
       selector: selector,
@@ -383,6 +388,6 @@ initialize();
 // ページロード完了後にも実行
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initialize);
-} else {
-  initialize();
+          } else {
+initialize();
 } 
