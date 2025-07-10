@@ -75,6 +75,81 @@ let currentUrl = window.location.href;
 function initialize() {
   console.log('Initializing LibeCity content script...');
   
+  // デバッグ用ヘルパー関数をグローバルに追加
+  window.libecityDebug = {
+    // 保存済み投稿の情報を表示
+    showSavedPosts: async () => {
+      const savedPosts = await getSavedPostsInfo();
+      console.log('=== SAVED POSTS DEBUG ===');
+      console.log('Total saved posts:', Object.keys(savedPosts).length);
+      Object.entries(savedPosts).forEach(([id, info]) => {
+        console.log(`ID: ${id}`);
+        console.log(`  URL: ${info.pageUrl}`);
+        console.log(`  Saved at: ${info.timestamp || new Date(info.savedAt).toISOString()}`);
+      });
+      console.log('=== END SAVED POSTS DEBUG ===');
+      return savedPosts;
+    },
+    
+    // 重複IDを検出
+    findDuplicateIds: async () => {
+      const savedPosts = await getSavedPostsInfo();
+      const idCounts = {};
+      const duplicates = {};
+      
+      Object.keys(savedPosts).forEach(id => {
+        const prefix = id.split(':')[1];
+        if (prefix) {
+          idCounts[prefix] = (idCounts[prefix] || 0) + 1;
+          if (idCounts[prefix] > 1) {
+            if (!duplicates[prefix]) duplicates[prefix] = [];
+            duplicates[prefix].push(id);
+          }
+        }
+      });
+      
+      console.log('=== DUPLICATE ID DETECTION ===');
+      if (Object.keys(duplicates).length === 0) {
+        console.log('No duplicate IDs found.');
+      } else {
+        console.log('Duplicate ID prefixes found:');
+        Object.entries(duplicates).forEach(([prefix, ids]) => {
+          console.log(`Prefix: ${prefix}`);
+          console.log(`IDs: ${ids.join(', ')}`);
+        });
+      }
+      console.log('=== END DUPLICATE ID DETECTION ===');
+      return duplicates;
+    },
+    
+    // ストレージをクリア（注意：すべての保存情報が削除されます）
+    clearStorage: async () => {
+      if (confirm('⚠️ すべての保存済み投稿情報を削除しますか？この操作は元に戻せません。')) {
+        await chrome.storage.local.clear();
+        console.log('✅ Storage cleared successfully');
+        location.reload();
+      }
+    },
+    
+    // 特定のIDを削除
+    removePostId: async (postId) => {
+      const savedPosts = await getSavedPostsInfo();
+      if (savedPosts[postId]) {
+        delete savedPosts[postId];
+        await chrome.storage.local.set({ savedPosts: savedPosts });
+        console.log(`✅ Removed post ID: ${postId}`);
+      } else {
+        console.log(`❌ Post ID not found: ${postId}`);
+      }
+    }
+  };
+  
+  console.log('🔧 Debug tools available: window.libecityDebug');
+  console.log('  - showSavedPosts(): 保存済み投稿を表示');
+  console.log('  - findDuplicateIds(): 重複IDを検出');
+  console.log('  - clearStorage(): ストレージをクリア');
+  console.log('  - removePostId(id): 特定のIDを削除');
+  
   // 即座に基本機能をセットアップ
   setupMessageListeners();
   
@@ -1404,6 +1479,8 @@ const processedElements = new WeakSet(); // DOM要素自体を追跡
 
 function addNotionIconsToPosts() {
   try {
+    console.log('=== STARTING addNotionIconsToPosts ===');
+    
     // 既存のアイコンがある投稿は処理をスキップ
     const existingIcons = document.querySelectorAll('.notion-save-icon');
     const postsWithIcons = new Set();
@@ -1420,6 +1497,8 @@ function addNotionIconsToPosts() {
       }
     });
     
+    console.log(`Found ${existingIcons.length} existing icons, ${postsWithIcons.size} posts with icons`);
+    
     // つぶやき投稿を優先的に検出
     let tweetPosts = [];
     
@@ -1432,20 +1511,46 @@ function addNotionIconsToPosts() {
       const allPosts = document.querySelectorAll('.log_detail');
       tweetPosts = Array.from(allPosts).filter(post => {
         // 既にアイコンがある投稿は除外
-        if (postsWithIcons.has(post)) return false;
+        if (postsWithIcons.has(post) || processedElements.has(post)) {
+          return false;
+        }
         
         // つぶやき投稿かどうかを判定
         const isTweet = isTweetPost(post);
-        console.log(`Post check: isTweet=${isTweet}, hasIcon=${postsWithIcons.has(post)}`);
-        return isTweet;
+        if (!isTweet) {
+          return false;
+        }
+        
+        // つぶやき投稿の場合、data-idチェックを緩和
+        const dataId = post.getAttribute('data-id');
+        console.log(`Tweet post check: dataId=${dataId}, hasIcon=${postsWithIcons.has(post)}`);
+        
+        // data-idが存在する場合は重複チェック
+        if (dataId && dataId !== '' && dataId !== 'null') {
+          if (processedPostIds.has(dataId)) {
+            console.log(`Skipping already processed tweet data-id: ${dataId}`);
+            return false;
+          }
+        }
+        
+        // つぶやき投稿では、data-idがなくてもテキストベースのIDが生成可能かチェック
+        const tweetId = getTweetUniqueId(post);
+        if (!tweetId) {
+          console.log('Skipping tweet: cannot generate reliable ID');
+          return false;
+        }
+        
+        console.log(`Valid tweet post found: dataId=${dataId}, tweetId=${tweetId}`);
+        return true;
       });
       
              if (tweetPosts.length > 0) {
-         console.log(`Found ${allPosts.length} total posts, ${tweetPosts.length} are valid tweets (${allPosts.length - tweetPosts.length} already have icons)`);
+        console.log(`Found ${allPosts.length} total posts, ${tweetPosts.length} are valid tweets (${allPosts.length - tweetPosts.length} already processed or invalid)`);
        }
     } else {
       // 通常のチャット投稿を処理
       console.log('Processing regular chat posts (not on tweet page)');
+      
       // より簡潔で確実なアプローチ：data-idを最優先、他は補完的
       const postSelectors = [
         'article[data-id]',  // data-idがある要素を最優先（メイン）
@@ -1464,31 +1569,16 @@ function addNotionIconsToPosts() {
         const foundPosts = document.querySelectorAll(selector);
         console.log(`Selector "${selector}" found ${foundPosts.length} elements`);
         
-        // DOM構造をデバッグ（最初の要素のみ）
-        if (foundPosts.length > 0 && selector === 'article[data-id]') {
-          const firstPost = foundPosts[0];
-          console.log('First article[data-id] element:', firstPost);
-          console.log('- tagName:', firstPost.tagName);
-          console.log('- className:', firstPost.className);
-          console.log('- data-id:', firstPost.getAttribute('data-id'));
-          console.log('- contains .log_detail:', !!firstPost.querySelector('.log_detail'));
-          console.log('- is .log_detail:', firstPost.classList.contains('log_detail'));
-        }
-        
-        if (foundPosts.length > 0 && selector === '.log_detail:not(article[data-id])') {
-          const firstPost = foundPosts[0];
-          console.log('First .log_detail:not(article[data-id]) element:', firstPost);
-          console.log('- tagName:', firstPost.tagName);
-          console.log('- className:', firstPost.className);
-          console.log('- data-id:', firstPost.getAttribute('data-id'));
-          console.log('- parent tagName:', firstPost.parentElement?.tagName);
-          console.log('- parent className:', firstPost.parentElement?.className);
-          console.log('- parent data-id:', firstPost.parentElement?.getAttribute('data-id'));
-        }
-        
         foundPosts.forEach(post => {
           // 既に処理済みの要素はスキップ
           if (processedElements.has(post) || allFoundElements.has(post) || processedElementsInThisRun.has(post)) {
+            return;
+          }
+          
+          // data-idがnullの場合は処理をスキップ
+          const dataId = post.getAttribute('data-id');
+          if (selector === 'article[data-id]' && (dataId === null || dataId === '')) {
+            console.log('Skipping article with null/empty data-id');
             return;
           }
           
@@ -1546,98 +1636,57 @@ function addNotionIconsToPosts() {
             return;
           }
           
-          const dataId = post.getAttribute('data-id');
           if (dataId) {
             // 既に処理済みの投稿はスキップ
             if (processedPostIds.has(dataId) || uniquePostsMap.has(dataId)) {
               console.log(`Skipping already processed data-id: ${dataId}`);
               return;
             }
-            // data-idがある場合は、最初に見つかった要素のみを保持
             uniquePostsMap.set(dataId, post);
-            allFoundElements.add(post);
-            processedElementsInThisRun.add(post); // この実行で処理済みとしてマーク
-            console.log(`Added post with data-id: ${dataId} from selector: ${selector}`);
-          } else {
-            // data-idがない場合も重複チェック
-            allFoundElements.add(post);
-            processedElementsInThisRun.add(post); // この実行で処理済みとしてマーク
-            console.log(`Added post without data-id from selector: ${selector}`);
+            processedPostIds.add(dataId);
           }
+          
+            allFoundElements.add(post);
+          processedElementsInThisRun.add(post);
+          processedElements.add(post); // グローバル追跡にも追加
         });
       }
       
-      // 重複除去後の投稿リストを作成
-      const allFoundPosts = Array.from(allFoundElements);
-      const postsWithDataId = allFoundPosts.filter(post => post.getAttribute('data-id')).length;
-      const postsWithoutDataId = allFoundPosts.length - postsWithDataId;
+      console.log(`Total unique posts found: ${allFoundElements.size}`);
       
-      console.log(`Found ${allFoundPosts.length} unique posts (${postsWithDataId} with data-id, ${postsWithoutDataId} without data-id)`);
-      
-      // フィルタリング処理
-      const regularPosts = allFoundPosts.filter((post, index) => {
-        const dataId = post.getAttribute('data-id');
-        
-        // 既にアイコンがある投稿は除外
-        if (postsWithIcons.has(post)) {
-          return false;
+      // 通常投稿にアイコンを追加
+      let regularPostIndex = 0;
+      for (const post of allFoundElements) {
+        try {
+          console.log(`Processing regular post ${regularPostIndex + 1}/${allFoundElements.size}:`, post);
+          addNotionIconToRegularPost(post, regularPostIndex);
+          regularPostIndex++;
+        } catch (error) {
+          console.error('Failed to add icon to regular post:', error);
         }
-        
-        // DOM要素内に既にNotionアイコンがないかチェック
-        if (post.querySelector('.notion-save-icon')) {
-          return false;
-        }
-        
-        // data-idで既存アイコンをチェック
-        if (dataId && document.querySelector(`[data-post-id="${dataId}"]`)) {
-          console.log(`Icon already exists for data-id ${dataId}, skipping...`);
-          return false;
-        }
-        
-        // つぶやき投稿は除外（通常のチャット投稿のみ処理）
-        const isTweet = isTweetPost(post);
-        if (isTweet) {
-          console.log(`Skipping tweet post with data-id: ${dataId}`);
-          return false;
-        }
-        
-        // 有効な投稿かチェック
-        const isValid = isValidPost(post);
-        return isValid;
-      });
-      
-      if (regularPosts.length > 0) {
-        const finalPostsWithDataId = regularPosts.filter(post => post.getAttribute('data-id')).length;
-        console.log(`Adding Notion icons to ${regularPosts.length} new regular posts (${finalPostsWithDataId} with data-id)`);
-        
-        // 各通常投稿にアイコンを追加
-        regularPosts.forEach((post, index) => {
-          if (post && !post.querySelector('.notion-save-icon')) {
+      }
+    }
+    
+    // つぶやき投稿にアイコンを追加
+    tweetPosts.forEach((post, index) => {
+      try {
+        console.log(`Processing tweet post ${index + 1}/${tweetPosts.length}:`, post);
             // 処理済みとしてマーク
-            processedElements.add(post); // DOM要素を追跡
+        processedElements.add(post);
             const dataId = post.getAttribute('data-id');
             if (dataId) {
               processedPostIds.add(dataId);
             }
-            requestAnimationFrame(() => addNotionIconToRegularPost(post, index));
-          }
-        });
+        addNotionIconToTweetPost(post, index);
+      } catch (error) {
+        console.error('Failed to add icon to tweet post:', error);
       }
-    }
+    });
     
-    if (tweetPosts.length > 0) {
-      console.log(`Adding Notion icons to ${tweetPosts.length} new tweet posts`);
-      
-      // 各つぶやき投稿にアイコンを追加
-      tweetPosts.forEach((post, index) => {
-        if (post && !post.querySelector('.notion-save-icon')) {
-          requestAnimationFrame(() => addNotionIconToTweetPost(post, index));
-        }
-      });
-    }
+    console.log('=== COMPLETED addNotionIconsToPosts ===');
     
   } catch (error) {
-    console.error('Failed to add Notion icons to tweet posts:', error);
+    console.error('Error in addNotionIconsToPosts:', error);
   }
 }
 
@@ -2689,14 +2738,14 @@ async function extractElementContent(element) {
             structuredBlocks: content.structuredContent.length,
             structuredTextLength: structuredTextLength,
             mainTextLength: content.text ? content.text.length : 0
-          });
-          
+            });
+            
           // 構造化コンテンツに十分なテキストがある場合のみメインテキストをクリア
           if (structuredTextLength > 100) {
             console.log(`Sufficient structured content found (${structuredTextLength} chars), clearing main text to prevent duplication`);
             content.text = '（構造化コンテンツのみ使用）'; // 特別なマーカーを設定
             content.useStructuredContentOnly = true; // フラグを設定
-          } else {
+            } else {
             console.log(`Insufficient structured content (${structuredTextLength} chars), keeping main text to ensure content availability`);
             content.useStructuredContentOnly = false;
           }
@@ -2791,8 +2840,8 @@ function validateAndCleanContent(content) {
           throw new Error('テキストコンテンツが空です。この投稿は保存できません。');
         }
       } else {
-        console.error('Empty text content after cleaning');
-        throw new Error('テキストコンテンツが空です。この投稿は保存できません。');
+      console.error('Empty text content after cleaning');
+      throw new Error('テキストコンテンツが空です。この投稿は保存できません。');
       }
     }
     
@@ -2859,142 +2908,122 @@ const savedPosts = new Set();
 
 // 投稿の一意性を判定する関数
 function getPostUniqueId(postElement) {
-  // data-id属性があればそれを使用（最優先）
+  console.log('=== GENERATING POST UNIQUE ID ===');
+  
+  // 1. data-id属性があればそれを使用
   const dataId = postElement.getAttribute('data-id') || 
-                 postElement.getAttribute('data-post-id') ||
-                 postElement.getAttribute('data-message-id');
-  if (dataId) {
-    return `data-id:${dataId}`;
+                 postElement.getAttribute('data-post-id');
+  if (dataId && dataId !== 'null' && dataId !== '') {
+    const postId = `post-data:${dataId}`;
+    console.log('Generated post ID from data attribute:', postId);
+    return postId;
   }
   
-  // つぶやき投稿の特別処理：より安定したID生成
-  const isOriginalTweet = postElement.classList.contains('originalTweetArea') || 
-                         postElement.querySelector('.originalTweetArea') ||
-                         postElement.classList.contains('tweetArea') ||
-                         postElement.querySelector('.tweetArea');
+  // 2. 投稿テキストから安定したIDを生成
+  let postText = '';
   
-  // DOM要素の特徴を組み合わせて一意性を高める（つぶやき投稿対応）
-  const elementFeatures = {
-    tagName: postElement.tagName,
-    className: postElement.className,
-    childElementCount: postElement.childElementCount,
-    firstChildTagName: postElement.firstElementChild?.tagName || '',
-    hasImages: postElement.querySelectorAll('img').length > 0,
-    hasLinks: postElement.querySelectorAll('a').length > 0,
-    isTweet: isOriginalTweet,
-    parentClassName: postElement.parentElement?.className || ''
-  };
+  // 投稿テキストを抽出
+  const textSelectors = [
+    '.post_text',
+    '.message-text',
+    '.content-text',
+    '.text-content',
+    '.post-content',
+    '.message-content'
+  ];
   
-  // テキストコンテンツのハッシュを生成（Notionアイコンのテキストを除外）
-  let textContent = postElement.textContent || '';
+  for (const selector of textSelectors) {
+    const textElement = postElement.querySelector(selector);
+    if (textElement) {
+      postText = textElement.textContent || '';
+      break;
+    }
+  }
   
-  // Notionアイコン関連のテキストを除去
-  textContent = textContent
-    .replace(/Notionに保存/g, '')
-    .replace(/保存中\.\.\./g, '')
-    .replace(/保存中/g, '')
-    .replace(/保存完了!/g, '')
-    .replace(/保存済み/g, '')
-    .replace(/保存エラー/g, '');
+  // テキストが見つからない場合は全体のテキストを使用
+  if (!postText) {
+    postText = postElement.textContent || '';
+  }
   
-  const cleanText = textContent.replace(/\s+/g, ' ').trim();
-  
-  // つぶやき投稿の場合は、より厳密なテキスト抽出を行う
-  if (isOriginalTweet && cleanText.length > 5) {
-    const tweetTextElement = postElement.querySelector('.post_text') || 
-                            postElement.querySelector('.originalTweetArea .post_text') ||
-                            postElement.querySelector('.tweetArea .post_text');
-    
-    if (tweetTextElement) {
-      let tweetText = tweetTextElement.textContent || '';
       // Notionアイコンのテキストを除去
-      tweetText = tweetText
+  postText = postText
         .replace(/Notionに保存/g, '')
-        .replace(/保存中\.\.\./g, '')
-        .replace(/保存中/g, '')
-        .replace(/保存完了!/g, '')
+    .replace(/保存中\.*/g, '')
+    .replace(/保存完了!?/g, '')
         .replace(/保存済み/g, '')
+    .replace(/Notionで開く/g, '')
         .replace(/保存エラー/g, '')
         .replace(/\s+/g, ' ')
         .trim();
       
-      if (tweetText.length > 5) {
-        // つぶやきテキストのハッシュを生成
-        const hashText = tweetText.substring(0, 100);
-        try {
-          const utf8Bytes = new TextEncoder().encode(hashText);
-          if (utf8Bytes.length <= 8000) {
-            const binaryString = String.fromCharCode(...utf8Bytes);
-            const featuresHash = JSON.stringify(elementFeatures).length.toString(36);
-            const tweetId = `tweet-text:${btoa(binaryString).substring(0, 15)}-${featuresHash}`;
-            console.log('Generated tweet ID from text:', tweetId);
-            return tweetId;
-          }
-        } catch (error) {
-          console.warn('Failed to encode tweet text, using fallback method');
-        }
-        
-        // フォールバック：シンプルハッシュ
-        let simpleHash = 0;
-        for (let i = 0; i < Math.min(hashText.length, 50); i++) {
-          const char = hashText.charCodeAt(i);
-          simpleHash = ((simpleHash << 5) - simpleHash) + char;
-          simpleHash = simpleHash & simpleHash;
-        }
-        
-        const firstChars = hashText.substring(0, 10).replace(/[^\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/g, '');
-        const lengthHash = hashText.length.toString(36);
-        const featuresHash = JSON.stringify(elementFeatures).length.toString(36);
-        const combinedHash = `${Math.abs(simpleHash).toString(36)}-${lengthHash}-${featuresHash}-${firstChars}`;
-        
-        const tweetId = `tweet-text:${combinedHash.substring(0, 25)}`;
-        console.log('Generated tweet ID from simple hash:', tweetId);
-        return tweetId;
+  if (postText.length >= 5) {
+    // 作者名も含めてより一意性を高める
+    const authorSelectors = [
+      '.post_user_name',
+      '.author-name',
+      '.user-name',
+      '.username',
+      '.author'
+    ];
+    
+    let authorName = '';
+    for (const selector of authorSelectors) {
+      const authorElement = postElement.querySelector(selector);
+      if (authorElement) {
+        authorName = authorElement.textContent?.trim() || '';
+        break;
       }
+    }
+    
+    // 時刻情報も含める
+    const timeElement = postElement.querySelector('time');
+    let timeInfo = '';
+    if (timeElement) {
+      // time要素をクローンしてNotionアイコンを除去
+      const clonedTimeElement = timeElement.cloneNode(true);
+      const notionIcons = clonedTimeElement.querySelectorAll('.notion-save-icon');
+      notionIcons.forEach(icon => icon.remove());
+        
+      const timeText = clonedTimeElement.textContent?.trim();
+      // 絶対時刻のみ使用（「2分」「1時間」などの相対時刻は除外）
+      if (timeText && !timeText.match(/^\d+[分時秒日週月年]/)) {
+        timeInfo = timeText;
     }
   }
   
-  // 通常の投稿の場合
-  if (cleanText.length > 10) {
-    // テキストの最初の100文字をハッシュ化（日本語対応）
-    const hashText = cleanText.substring(0, 100);
-    try {
-      // 方法1: UTF-8文字列を安全にBase64エンコード
-      const utf8Bytes = new TextEncoder().encode(hashText);
-      if (utf8Bytes.length <= 8000) {
-        const binaryString = String.fromCharCode(...utf8Bytes);
-        const featuresHash = JSON.stringify(elementFeatures).length.toString(36);
-        return `text-hash:${btoa(binaryString).substring(0, 15)}-${featuresHash}`;
-      }
-    } catch (error) {
-      console.warn('Failed to encode text for hash, using simple hash:', error);
-    }
+    // ハッシュ生成用の文字列を作成
+    const hashSource = `${postText.substring(0, 100)}|${authorName}|${timeInfo}`;
     
-    // 方法2: 日本語対応のシンプルハッシュ
+    try {
+      // UTF-8エンコードしてBase64化
+      const utf8Bytes = new TextEncoder().encode(hashSource);
+        const binaryString = String.fromCharCode(...utf8Bytes);
+      const base64Hash = btoa(binaryString).substring(0, 16);
+      
+      const postId = `post-content:${base64Hash}`;
+      console.log('Generated post ID from content:', postId);
+      return postId;
+      
+    } catch (error) {
+      console.warn('Failed to encode post content, using simple hash');
+    
+      // フォールバック：シンプルハッシュ
     let simpleHash = 0;
-    for (let i = 0; i < Math.min(hashText.length, 50); i++) {
-      const char = hashText.charCodeAt(i);
+      for (let i = 0; i < Math.min(hashSource.length, 50); i++) {
+        const char = hashSource.charCodeAt(i);
       simpleHash = ((simpleHash << 5) - simpleHash) + char;
       simpleHash = simpleHash & simpleHash;
     }
     
-    // 方法3: 文字列の長さと最初の数文字を組み合わせ（日本語文字も保持）
-    const firstChars = hashText.substring(0, 10).replace(/[^\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/g, '');
-    const lengthHash = hashText.length.toString(36);
-    const featuresHash = JSON.stringify(elementFeatures).length.toString(36);
-    const combinedHash = `${Math.abs(simpleHash).toString(36)}-${lengthHash}-${featuresHash}-${firstChars}`;
-    
-    return `text-hash:${combinedHash.substring(0, 25)}`;
+      const postId = `post-simple:${Math.abs(simpleHash).toString(36)}`;
+      console.log('Generated post ID from simple hash:', postId);
+      return postId;
+    }
   }
   
-  // フォールバック: 要素の位置とクラス名、時刻、要素特徴を組み合わせ
-  const rect = postElement.getBoundingClientRect();
-  const className = postElement.className || '';
-  const timestamp = Date.now();
-  const featuresHash = JSON.stringify(elementFeatures).length.toString(36);
-  const fallbackId = `position:${Math.round(rect.top)}-${Math.round(rect.left)}-${className.substring(0, 10)}-${timestamp}-${featuresHash}`;
-  console.log('Generated fallback ID:', fallbackId);
-  return fallbackId;
+  // 3. 最終フォールバック：null を返して処理をスキップ
+  console.log('Cannot generate reliable post ID, returning null');
+  return null;
 }
 
 // Notionの制限値定数
@@ -3101,7 +3130,7 @@ async function handleNotionSave(postElement, iconElement) {
     if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
       throw new Error('Chrome拡張機能APIが利用できません。ページを再読み込みしてください。');
     }
-
+    
     // 保存先データベースを取得
     let databaseId;
     try {
@@ -4011,7 +4040,7 @@ function getTweetUniqueId(tweetElement) {
   // 1. data-id属性があればそれを使用
   const dataId = tweetElement.getAttribute('data-id') || 
                  tweetElement.getAttribute('data-post-id');
-  if (dataId) {
+  if (dataId && dataId !== 'null' && dataId !== '') {
     const tweetId = `tweet-data:${dataId}`;
     console.log('Generated tweet ID from data attribute:', tweetId);
     return tweetId;
@@ -4028,39 +4057,79 @@ function getTweetUniqueId(tweetElement) {
       .replace(/保存中\.*/g, '')
       .replace(/保存完了!?/g, '')
       .replace(/保存済み/g, '')
+      .replace(/Notionで開く/g, '')
       .replace(/保存エラー/g, '')
       .replace(/\s+/g, ' ')
       .trim();
     
     if (tweetText.length >= 5) {
-      // 作者名も含めてより一意性を高める
-      const authorElement = tweetElement.querySelector('.post_user_name');
-      const authorName = authorElement ? authorElement.textContent?.trim() : '';
+      // 作者名を取得（複数のセレクタを試行）
+      let authorName = '';
+      const authorSelectors = ['.post_user_name', '.username', 'a.username'];
+      for (const selector of authorSelectors) {
+        const authorElement = tweetElement.querySelector(selector);
+        if (authorElement) {
+          authorName = authorElement.textContent?.trim() || '';
+          break;
+        }
+      }
       
-             // 時刻情報も含める（相対時刻の場合は除く）
-       const timeElement = tweetElement.querySelector('time');
-       let timeInfo = '';
-       if (timeElement) {
-         // time要素をクローンしてNotionアイコンを除去
-         const clonedTimeElement = timeElement.cloneNode(true);
-         const notionIcons = clonedTimeElement.querySelectorAll('.notion-save-icon');
-         notionIcons.forEach(icon => icon.remove());
-         
-         const timeText = clonedTimeElement.textContent?.trim();
-         // 絶対時刻のみ使用（「2分」「1時間」などの相対時刻は除外）
-         if (timeText && !timeText.match(/^\d+[分時秒日週月年]/)) {
-           timeInfo = timeText;
-         }
-       }
+      // 時刻情報を取得（相対時刻も含めて使用し、より一意性を高める）
+      const timeElement = tweetElement.querySelector('time');
+      let timeInfo = '';
+      if (timeElement) {
+        // time要素をクローンしてNotionアイコンを除去
+        const clonedTimeElement = timeElement.cloneNode(true);
+        const notionIcons = clonedTimeElement.querySelectorAll('.notion-save-icon');
+        notionIcons.forEach(icon => icon.remove());
+        
+        timeInfo = clonedTimeElement.textContent?.trim() || '';
+      }
       
-      // ハッシュ生成用の文字列を作成
-      const hashSource = `${tweetText.substring(0, 100)}|${authorName}|${timeInfo}`;
+      // DOM要素の詳細な位置情報を取得
+      const allTweetElements = Array.from(document.querySelectorAll('.log_detail'));
+      const elementIndex = allTweetElements.indexOf(tweetElement);
+      
+      // より詳細な位置情報を生成
+      let positionInfo = '';
+      try {
+        const rect = tweetElement.getBoundingClientRect();
+        const parentElement = tweetElement.parentElement;
+        const siblingIndex = parentElement ? Array.from(parentElement.children).indexOf(tweetElement) : -1;
+        
+        // 複数の位置指標を組み合わせ
+        positionInfo = [
+          elementIndex,
+          siblingIndex,
+          Math.floor(rect.top),
+          Math.floor(rect.left),
+          Math.floor(rect.width),
+          Math.floor(rect.height)
+        ].join(':');
+      } catch (error) {
+        // 位置情報取得に失敗した場合はタイムスタンプを使用
+        positionInfo = Date.now().toString();
+      }
+      
+      // DOM階層情報も追加（さらなる一意性のため）
+      const hierarchyInfo = tweetElement.tagName + (tweetElement.className ? '.' + tweetElement.className.split(' ').join('.') : '');
+      
+      // ハッシュ生成用の文字列を作成（より多くの情報を含める）
+      const hashSource = `${tweetText.substring(0, 100)}|${authorName}|${timeInfo}|${positionInfo}|${hierarchyInfo}`;
+      
+      console.log('Tweet hash source components:');
+      console.log('- Text (100 chars):', tweetText.substring(0, 100));
+      console.log('- Author:', authorName);
+      console.log('- Time:', timeInfo);
+      console.log('- Position:', positionInfo);
+      console.log('- Hierarchy:', hierarchyInfo);
+      console.log('- Full hash source:', hashSource);
       
       try {
         // UTF-8エンコードしてBase64化
         const utf8Bytes = new TextEncoder().encode(hashSource);
         const binaryString = String.fromCharCode(...utf8Bytes);
-        const base64Hash = btoa(binaryString).substring(0, 16);
+        const base64Hash = btoa(binaryString).substring(0, 20); // より長いハッシュで衝突を回避
         
         const tweetId = `tweet-content:${base64Hash}`;
         console.log('Generated tweet ID from content:', tweetId);
@@ -4069,29 +4138,28 @@ function getTweetUniqueId(tweetElement) {
       } catch (error) {
         console.warn('Failed to encode tweet content, using simple hash');
         
-        // フォールバック：シンプルハッシュ
+        // フォールバック：より強力なシンプルハッシュ
         let simpleHash = 0;
-        for (let i = 0; i < Math.min(hashSource.length, 50); i++) {
+        for (let i = 0; i < hashSource.length; i++) {
           const char = hashSource.charCodeAt(i);
           simpleHash = ((simpleHash << 5) - simpleHash) + char;
           simpleHash = simpleHash & simpleHash;
         }
         
-        const tweetId = `tweet-simple:${Math.abs(simpleHash).toString(36)}`;
+        // 現在時刻も含めてさらに一意性を高める
+        const timestamp = Date.now() % 10000; // 下4桁のみ使用
+        const combinedHash = Math.abs(simpleHash) + timestamp;
+        
+        const tweetId = `tweet-simple:${combinedHash.toString(36)}`;
         console.log('Generated tweet ID from simple hash:', tweetId);
         return tweetId;
       }
     }
   }
   
-  // 3. フォールバック：要素の位置と特徴
-  const rect = tweetElement.getBoundingClientRect();
-  const className = tweetElement.className || '';
-  const childCount = tweetElement.childElementCount;
-  
-  const fallbackId = `tweet-fallback:${Math.round(rect.top)}-${Math.round(rect.left)}-${className.substring(0, 8)}-${childCount}`;
-  console.log('Generated tweet fallback ID:', fallbackId);
-  return fallbackId;
+  // 3. 最終フォールバック：null を返して処理をスキップ
+  console.log('Cannot generate reliable tweet ID, returning null');
+  return null;
 }
 
 // Chrome拡張機能のコンテキスト有効性チェック
@@ -4197,7 +4265,7 @@ async function handleTweetSave(tweetElement, iconElement) {
     if (!chrome.storage.sync) {
       throw new Error('Chrome拡張機能のsync storageが利用できません。拡張機能の設定を確認してください。');
     }
-
+    
     // 保存先データベース取得
     let settings, databaseId;
     try {
@@ -4396,15 +4464,15 @@ function showSuccessIcon(iconElement, pageUrl = null) {
     setTimeout(() => resetIcon(iconElement), 10000);
   } else {
     // 従来の保存完了表示
-    iconElement.innerHTML = `
-      <svg viewBox="0 0 24 24" width="14" height="14">
-        <path fill="white" d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
-      </svg>
-      <span>保存完了!</span>
-    `;
-    
-    // 3秒後に元に戻す
-    setTimeout(() => resetIcon(iconElement), 3000);
+  iconElement.innerHTML = `
+    <svg viewBox="0 0 24 24" width="14" height="14">
+      <path fill="white" d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+    </svg>
+    <span>保存完了!</span>
+  `;
+  
+  // 3秒後に元に戻す
+  setTimeout(() => resetIcon(iconElement), 3000);
   }
 }
 
@@ -4540,8 +4608,8 @@ function adjustTooltipPosition(tooltip, iconElement) {
   const existingArrow = tooltip.querySelector('.tooltip-arrow');
   if (existingArrow) {
     existingArrow.remove();
-  }
-  
+}
+
   // 位置を計算するため、一時的に表示
   const originalDisplay = tooltip.style.display;
   tooltip.style.display = 'block';
@@ -4678,15 +4746,15 @@ function showAlreadySavedIcon(iconElement, pageUrl = null) {
     // ボタンは永続的に表示（タイムアウトなし）
   } else {
     // 従来の保存済み表示
-    iconElement.innerHTML = `
-      <svg viewBox="0 0 24 24" width="14" height="14">
-        <path fill="white" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-      </svg>
-      <span>保存済み</span>
-    `;
-    
-    // 2秒後に元に戻す
-    setTimeout(() => resetIcon(iconElement), 2000);
+  iconElement.innerHTML = `
+    <svg viewBox="0 0 24 24" width="14" height="14">
+      <path fill="white" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+    </svg>
+    <span>保存済み</span>
+  `;
+  
+  // 2秒後に元に戻す
+  setTimeout(() => resetIcon(iconElement), 2000);
   }
 }
 
@@ -4765,7 +4833,7 @@ function performStepwiseOptimization(structuredContent, maxBlocks, totalTextLeng
   if (currentContent.length <= maxBlocks) {
     console.log('✅ Step 3で制限内に収まりました');
     return currentContent;
-  }
+    }
   
   // Step 4: 緊急省略（強制的な制限適用）
   console.warn('⚠️ 緊急省略を実行します');
@@ -4794,8 +4862,8 @@ function cleanupUnnecessaryElements(content) {
     acc.push(item);
     return acc;
   }, []);
-}
-
+  }
+  
 // Step 2: テキストブロックのスマート統合（改良版）
 function smartCombineTextBlocks(content, maxBlocks) {
   const combined = [];
@@ -4805,7 +4873,7 @@ function smartCombineTextBlocks(content, maxBlocks) {
   const maxRichTextPerBlock = NOTION_LIMITS.MAX_RICH_TEXT_PER_BLOCK;
   
   console.log(`🔗 スマート統合開始: ${content.length} アイテム -> 目標: ${maxBlocks} ブロック以下`);
-  
+    
   for (const item of content) {
     // 画像は独立して保持
     if (item.type === 'image') {
@@ -4844,17 +4912,17 @@ function smartCombineTextBlocks(content, maxBlocks) {
       currentParagraph.push(item);
       currentCharCount += itemCharCount;
     }
-  }
-  
+      }
+      
   // 最後の段落をコミット
-  if (currentParagraph.length > 0) {
+        if (currentParagraph.length > 0) {
     combined.push(createCombinedTextBlock(currentParagraph));
   }
   
   console.log(`🔗 スマート統合完了: ${content.length} -> ${combined.length} ブロック (${content.length - combined.length} ブロック削減)`);
   return combined;
-}
-
+        }
+        
 // Step 3: 選択的コンテンツ削減（改良版）
 function selectiveContentReduction(content, maxBlocks) {
   console.log(`✂️ 選択的削減開始: ${content.length} -> ${maxBlocks} ブロック`);
@@ -4891,11 +4959,11 @@ function selectiveContentReduction(content, maxBlocks) {
       .substring(0, 300);
     
     selectedItems.push(createTruncationMessage(omittedCount, omittedText, 'selective'));
-  }
+          }
   
   return selectedItems;
-}
-
+  }
+  
 // 重要度スコアの計算（改良版）
 function calculateImportanceScore(item, index, totalLength) {
   let score = 0;
@@ -5016,7 +5084,7 @@ function optimizeForCharacterLimit(structuredContent, maxCharacters = NOTION_LIM
       // 改行は段落内で制限
       const linebreakCount = currentParagraph.filter(p => p.type === 'linebreak').length;
              if (linebreakCount < NOTION_LIMITS.MAX_LINEBREAKS_PER_PARAGRAPH) { // 段落内の改行を制限
-        currentParagraph.push(item);
+      currentParagraph.push(item);
       }
       continue;
     }
@@ -5046,8 +5114,8 @@ function optimizeForCharacterLimit(structuredContent, maxCharacters = NOTION_LIM
         const truncationBlock = {
           type: 'callout',
           callout: {
-            rich_text: [{
-              type: 'text',
+          rich_text: [{
+            type: 'text',
               text: { 
                 content: `[文字数制限のため省略] 残り約${remainingItems}個のコンテンツが省略されました。\n\n省略されたテキストの一部: "${remainingText}..."\n\n完全な内容は元の投稿をご確認ください。` 
               },
@@ -5064,9 +5132,9 @@ function optimizeForCharacterLimit(structuredContent, maxCharacters = NOTION_LIM
       // 段落の文字数制限チェック
       if (currentParagraphCharCount + itemLength > maxParagraphLength && currentParagraph.length > 0) {
         // 現在の段落をコミット
-        optimizedContent.push(createCombinedTextBlock(currentParagraph));
-        currentParagraph = [];
-        currentParagraphCharCount = 0;
+          optimizedContent.push(createCombinedTextBlock(currentParagraph));
+          currentParagraph = [];
+          currentParagraphCharCount = 0;
         
         // ブロック数制限をチェック
         if (optimizedContent.length >= maxBlocks - 1) {
@@ -5261,14 +5329,76 @@ async function getSavedPostInfo(postId) {
 async function checkAndUpdateSavedStatus(postElement, iconElement, isTweet) {
   try {
     const postId = isTweet ? getTweetUniqueId(postElement) : getPostUniqueId(postElement);
-    if (!postId) return;
     
-    const savedInfo = await getSavedPostInfo(postId);
-    if (savedInfo && savedInfo.pageUrl) {
-      console.log(`Post already saved: ${postId} -> ${savedInfo.pageUrl}`);
-      showAlreadySavedIcon(iconElement, savedInfo.pageUrl);
+    // ID生成失敗時は処理をスキップ
+    if (!postId || postId.includes('fallback')) {
+      console.log('Skipping saved status check due to invalid or fallback ID:', postId);
+      return;
     }
+    
+    // デバッグ情報を詳細出力
+    console.log('=== SAVED STATUS CHECK DEBUG ===');
+    console.log('Post element:', postElement);
+    console.log('Is tweet:', isTweet);
+    console.log('Generated post ID:', postId);
+    
+    // より詳細なデバッグ情報
+    if (isTweet) {
+      const textElement = postElement.querySelector('.post_text');
+      const authorElement = postElement.querySelector('a.username') || postElement.querySelector('.username');
+      const timeElement = postElement.querySelector('time');
+      
+      console.log('Tweet debug info:');
+      console.log('- Text element found:', !!textElement);
+      console.log('- Text content (first 100 chars):', textElement ? textElement.textContent?.substring(0, 100) : 'N/A');
+      console.log('- Author element found:', !!authorElement);
+      console.log('- Author name:', authorElement ? authorElement.textContent?.trim() : 'N/A');
+      console.log('- Time element found:', !!timeElement);
+      console.log('- Time text:', timeElement ? timeElement.textContent?.trim() : 'N/A');
+      console.log('- Element position in DOM:', Array.from(document.querySelectorAll('.log_detail')).indexOf(postElement));
+    }
+    
+    console.log('Post data-id:', postElement.getAttribute('data-id'));
+    console.log('Post className:', postElement.className);
+    
+    // ストレージから保存情報を取得
+    const savedInfo = await getSavedPostInfo(postId);
+    console.log('Saved info from storage:', savedInfo);
+    
+    // 同じIDで保存されている他の投稿も確認
+    const allSavedPosts = await getSavedPostsInfo();
+    const similarIds = Object.keys(allSavedPosts).filter(id => 
+      id.includes('tweet-content:') && id !== postId
+    );
+    
+    if (similarIds.length > 0) {
+      console.log('Other saved tweet IDs found:', similarIds);
+      console.log('Checking for potential ID collision...');
+      
+      // ID衝突の可能性をチェック
+      const currentIdPrefix = postId.split(':')[1];
+      const collisions = similarIds.filter(id => {
+        const otherPrefix = id.split(':')[1];
+        return otherPrefix === currentIdPrefix;
+      });
+      
+      if (collisions.length > 0) {
+        console.warn('⚠️ POTENTIAL ID COLLISION DETECTED!');
+        console.warn('Current ID:', postId);
+        console.warn('Colliding IDs:', collisions);
+      }
+    }
+    
+    if (savedInfo && savedInfo.pageUrl) {
+      console.log(`Post ${postId} is already saved, showing saved icon`);
+      showAlreadySavedIcon(iconElement, savedInfo.pageUrl);
+    } else {
+      console.log(`Post ${postId} is not saved yet`);
+    }
+    
+    console.log('=== END SAVED STATUS CHECK DEBUG ===');
+    
   } catch (error) {
-    console.error('Failed to check saved status:', error);
+    console.error('Error checking saved status:', error);
   }
 }
